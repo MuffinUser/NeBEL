@@ -3,6 +3,8 @@ module github.com/MarwinMoellers/strucrypt
 go 1.27.1
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.2
+	github.com/goccy/go-yaml v1.19.2
 	github.com/tink-crypto/tink-go/v2 v2.8.0
 	golang.org/x/crypto v0.57.0
 )

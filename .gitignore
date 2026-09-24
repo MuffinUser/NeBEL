@@ -1,0 +1,6 @@
+/bin/
+/dist/
+/strucrypt
+*.exe
+*.test
+*.out

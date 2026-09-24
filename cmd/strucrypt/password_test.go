@@ -1,14 +1,15 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
 
-// The password must reach `init` without ever becoming a command-line
-// argument: argv is world-readable on Linux, so any other local user can
-// read the shared password out of the process list while init runs.
-// These tests pin the input precedence that makes that possible.
+// The password must never become a command-line argument: argv is
+// world-readable on Linux, so any other local user can read the shared
+// password out of the process list while init runs. These tests pin the
+// input precedence that makes that possible.
 func TestResolvePasswordPrecedence(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -17,17 +18,18 @@ func TestResolvePasswordPrecedence(t *testing.T) {
 		want  string
 	}{
 		{"environment", "from-env", passwordInput{}, "from-env"},
-		{"environment beats argument", "from-env", passwordInput{arg: "from-argv"}, "from-env"},
 		// An empty variable is treated as unset: exporting
 		// STRUCRYPT_PASSWORD="" in CI is a missing secret, not a password.
-		{"argument when nothing safer is set", "", passwordInput{arg: "from-argv"}, "from-argv"},
+		{"empty environment falls through to the prompt", "", passwordInput{}, ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv(passwordEnv, tt.env)
 
-			got, err := tt.input.resolve(true)
+			// required=false so the "nothing supplied one" case returns
+			// rather than trying to open a terminal that isn't there.
+			got, err := tt.input.resolve(false)
 			if err != nil {
 				t.Fatalf("resolve: %v", err)
 			}
@@ -60,10 +62,9 @@ func TestParseInitArgs(t *testing.T) {
 		wantErr bool
 	}{
 		{"no arguments", nil, passwordInput{}, false},
-		{"positional password", []string{"hunter2"}, passwordInput{arg: "hunter2"}, false},
 		{"stdin flag", []string{"--password-stdin"}, passwordInput{fromStdin: true}, false},
 		{"unknown flag", []string{"--password", "hunter2"}, passwordInput{}, true},
-		{"two positionals", []string{"a", "b"}, passwordInput{}, true},
+		{"positional password", []string{"hunter2"}, passwordInput{}, true},
 	}
 
 	for _, tt := range tests {
@@ -85,14 +86,17 @@ func TestParseInitArgs(t *testing.T) {
 	}
 }
 
-// --password-stdin and a positional password name two different passwords;
-// silently preferring one would be a confusing way to fail.
-func TestResolveRejectsStdinWithArgument(t *testing.T) {
-	t.Setenv(passwordEnv, "")
-
-	if _, err := (passwordInput{arg: "hunter2", fromStdin: true}).resolve(true); err == nil {
-		t.Error("resolve() with both --password-stdin and an argument: want an error, got nil")
-	} else if !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Errorf("resolve() error = %v, want it to explain the conflict", err)
+// A password argument is refused outright, with an error that names the
+// supported inputs — accepting it with a warning would leave the password
+// just as exposed for everyone who didn't read the warning.
+func TestParseInitArgsRejectsPasswordArgument(t *testing.T) {
+	_, err := parseInitArgs([]string{"hunter2"})
+	if !errors.Is(err, ErrPasswordArgument) {
+		t.Fatalf("parseInitArgs() error = %v, want %v", err, ErrPasswordArgument)
+	}
+	for _, want := range []string{passwordEnv, "--password-stdin"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not point at %q:\n%s", want, err)
+		}
 	}
 }

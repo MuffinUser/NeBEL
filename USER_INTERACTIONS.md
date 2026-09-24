@@ -67,10 +67,11 @@ Sources, in order of precedence:
 
 1. `--password-stdin` — read from stdin, for piping out of a secret store.
 2. `$STRUCRYPT_PASSWORD` — the recommended CI path.
-3. A positional argument — still accepted so existing jobs keep working,
-   but warns about the exposure.
-4. An interactive prompt with echo disabled, when join mode needs a
+3. An interactive prompt with echo disabled, when join mode needs a
    password and nothing else supplied one.
+
+A password given as a command-line argument is refused, not accepted with
+a warning.
 
 ### CI usage
 

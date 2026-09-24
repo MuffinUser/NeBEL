@@ -41,11 +41,10 @@ func runInit(args []string) error {
 	return bootstrapRepo(root, configPath, password)
 }
 
-const initUsage = "usage: strucrypt init [--password-stdin] [password]"
+const initUsage = "usage: strucrypt init [--password-stdin]"
 
 func parseInitArgs(args []string) (passwordInput, error) {
 	var input passwordInput
-	positional := 0
 	for _, arg := range args {
 		switch {
 		case arg == "--password-stdin":
@@ -53,11 +52,8 @@ func parseInitArgs(args []string) (passwordInput, error) {
 		case strings.HasPrefix(arg, "-"):
 			return input, fmt.Errorf("unknown flag %q\n%s", arg, initUsage)
 		default:
-			positional++
-			if positional > 1 {
-				return input, fmt.Errorf("%s", initUsage)
-			}
-			input.arg = arg
+			// The only positional `init` ever took was the password.
+			return input, ErrPasswordArgument
 		}
 	}
 	return input, nil

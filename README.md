@@ -15,7 +15,7 @@ Grab an archive from
 **macOS** (use `amd64` instead of `arm64` on Intel):
 
 ```sh
-VERSION=v0.1.1
+VERSION=v0.2.0
 curl -LO "https://github.com/MarwinMoellers/strucrypt/releases/download/${VERSION}/strucrypt_${VERSION}_darwin_arm64.tar.gz"
 tar -xzf "strucrypt_${VERSION}_darwin_arm64.tar.gz"
 sudo mv "strucrypt_${VERSION}_darwin_arm64/strucrypt" /usr/local/bin/
@@ -26,7 +26,7 @@ xattr -d com.apple.quarantine /usr/local/bin/strucrypt
 **Windows** (PowerShell; reopen your terminal afterwards for `PATH`):
 
 ```powershell
-$Version = 'v0.1.1'
+$Version = 'v0.2.0'
 $Dest    = "$env:LOCALAPPDATA\Programs\strucrypt"
 Invoke-WebRequest "https://github.com/MarwinMoellers/strucrypt/releases/download/$Version/strucrypt_${Version}_windows_amd64.zip" -OutFile "$env:TEMP\s.zip"
 Expand-Archive "$env:TEMP\s.zip" -DestinationPath $env:TEMP -Force
@@ -64,9 +64,9 @@ password:
 strucrypt init
 ```
 
-Don't pass the password as an argument: it would be readable by other users
-on the machine, via the process list. Non-interactively, use the environment
-or stdin instead:
+A password given as an argument is refused — it would be readable by other
+users on the machine, via the process list. Non-interactively, use the
+environment or stdin instead:
 
 ```sh
 STRUCRYPT_PASSWORD="$SECRET" strucrypt init   # CI

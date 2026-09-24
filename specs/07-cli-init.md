@@ -44,15 +44,17 @@ an argument leaks the shared password to every other user on the machine,
 and to shell history and CI log echoes.
 
 Sources are consulted in order of decreasing safety: `--password-stdin`,
-then `$STRUCRYPT_PASSWORD`, then a positional argument, then an interactive
-prompt.
+then `$STRUCRYPT_PASSWORD`, then an interactive prompt. There is no
+command-line password argument.
 
 - **AC-7.10**: `$STRUCRYPT_PASSWORD` supplies the password with no TTY
   interaction required — the supported CI path.
 - **AC-7.11**: `--password-stdin` reads the password from stdin, stripping
   a single trailing line ending, so it can be piped from a secret store.
-- **AC-7.12**: a positional password argument still works, so existing
-  jobs keep running, but prints a warning naming the exposure.
+- **AC-7.12**: a positional password argument is refused with a clear
+  error naming the supported inputs, and registers nothing. Accepting it
+  with a warning would leave the password equally exposed for anyone who
+  didn't read the warning.
 - **AC-7.13**: in join mode with no password from any source, `init`
   prompts on a terminal with echo disabled; with no terminal it fails,
   naming the alternatives, and registers nothing.

@@ -95,22 +95,24 @@ func TestInitTakesPasswordFromStdin(t *testing.T) {
 	assertDecrypted(t, clone, plaintext)
 }
 
-// AC-7.12: a password on the command line still works, so existing CI jobs
-// keep running, but it warns — the argument is the one input path that
-// leaks the shared password to other users on the machine.
-func TestInitWarnsAboutPasswordArgument(t *testing.T) {
+// AC-7.12: a password on the command line is refused, with an error that
+// names the supported inputs — it is the one path that leaks the shared
+// password to other users on the machine, via the process list.
+func TestInitRejectsPasswordArgument(t *testing.T) {
 	pathEnv := pathEnvWithBin(t)
 	const password = "argv-sourced-password"
-	origin, plaintext := setupEncryptedOrigin(t, pathEnv, password)
+	origin, _ := setupEncryptedOrigin(t, pathEnv, password)
 
 	clone := cloneOf(t, pathEnv, origin)
 	out, err := runInitWith(t, clone, pathEnv, nil, "", password)
-	if err != nil {
-		t.Fatalf("join with a password argument: %v\n%s", err, out)
+	if err == nil {
+		t.Fatalf("join with a password argument: want an error, got success:\n%s", out)
 	}
-	assertDecrypted(t, clone, plaintext)
 	if !strings.Contains(out, "process list") {
-		t.Errorf("password argument did not warn about process-list exposure:\n%s", out)
+		t.Errorf("error does not explain the exposure:\n%s", out)
+	}
+	if _, err := runInExpectingError(t, clone, pathEnv, "git", "config", "--local", "--get", "filter.strucrypt.key"); err == nil {
+		t.Error("a refused init registered a local key")
 	}
 }
 

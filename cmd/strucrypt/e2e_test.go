@@ -89,6 +89,15 @@ func runInExpectingError(t *testing.T, dir, pathEnv, name string, args ...string
 	return string(out), err
 }
 
+// initWithPassword runs `strucrypt init`, supplying the password through
+// the environment — the command line no longer accepts one.
+func initWithPassword(t *testing.T, dir, pathEnv, password string) {
+	t.Helper()
+	if out, err := runInitWith(t, dir, pathEnv, []string{passwordEnv + "=" + password}, ""); err != nil {
+		t.Fatalf("strucrypt init (in %s): %v\n%s", dir, err, out)
+	}
+}
+
 func newTestRepo(t *testing.T, pathEnv string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -112,7 +121,7 @@ func TestEndToEndWholeFileHappyPath(t *testing.T) {
 	repo := newTestRepo(t, pathEnv)
 
 	// Bootstrap: init with a fixed password (non-interactive, as CI would).
-	runIn(t, repo, pathEnv, "strucrypt", "init", "test-password-123")
+	initWithPassword(t, repo, pathEnv, "test-password-123")
 	runIn(t, repo, pathEnv, "strucrypt", "add", "secrets/*.pem")
 
 	secretsDir := filepath.Join(repo, "secrets")
@@ -170,7 +179,7 @@ func TestCloneWithoutInitStaysEncrypted(t *testing.T) {
 	pathEnv := pathEnvWithBin(t)
 	origin := newTestRepo(t, pathEnv)
 	runIn(t, origin, pathEnv, "git", "config", "receive.denyCurrentBranch", "updateInstead")
-	runIn(t, origin, pathEnv, "strucrypt", "init", "test-password-123")
+	initWithPassword(t, origin, pathEnv, "test-password-123")
 	runIn(t, origin, pathEnv, "strucrypt", "add", "secrets/*.pem")
 
 	secretsDir := filepath.Join(origin, "secrets")
@@ -203,7 +212,7 @@ func TestCloneWithoutInitStaysEncrypted(t *testing.T) {
 
 	// Now join with the correct password: the file must be re-checked-out
 	// and decrypted (AC-7.8).
-	runIn(t, clonePath, pathEnv, "strucrypt", "init", "test-password-123")
+	initWithPassword(t, clonePath, pathEnv, "test-password-123")
 
 	joined, err := os.ReadFile(filepath.Join(clonePath, "secrets", "prod.pem"))
 	if err != nil {
@@ -219,11 +228,11 @@ func TestCloneWithoutInitStaysEncrypted(t *testing.T) {
 func TestJoinWithWrongPasswordFails(t *testing.T) {
 	pathEnv := pathEnvWithBin(t)
 	repo := newTestRepo(t, pathEnv)
-	runIn(t, repo, pathEnv, "strucrypt", "init", "correct-password")
+	initWithPassword(t, repo, pathEnv, "correct-password")
 
 	keyBefore := runIn(t, repo, pathEnv, "git", "config", "--local", "--get", "filter.strucrypt.key")
 
-	out, err := runInExpectingError(t, repo, pathEnv, "strucrypt", "init", "wrong-password")
+	out, err := runInitWith(t, repo, pathEnv, []string{passwordEnv + "=wrong-password"}, "")
 	if err == nil {
 		t.Fatalf("strucrypt init with wrong password: want an error, got success: %s", out)
 	}

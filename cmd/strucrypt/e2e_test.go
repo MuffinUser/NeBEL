@@ -6,9 +6,23 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 )
+
+// binName is "strucrypt.exe" on Windows: git's filter driver invocation
+// (filter.strucrypt.clean = "strucrypt clean %f") is resolved by the shell
+// git uses internally, which follows PATHEXT — a bare extension-less
+// "strucrypt" on PATH is not guaranteed to resolve the same way a real
+// release binary (built with the .exe suffix) would.
+var binName = "strucrypt"
+
+func init() {
+	if runtime.GOOS == "windows" {
+		binName = "strucrypt.exe"
+	}
+}
 
 // buildOnce compiles the strucrypt binary a single time for every e2e test
 // in this package. runIn resolves "strucrypt" to this absolute path
@@ -31,7 +45,7 @@ func ensureBinary(t *testing.T) string {
 		if buildErr != nil {
 			return
 		}
-		binPath := filepath.Join(binDir, "strucrypt")
+		binPath := filepath.Join(binDir, binName)
 		cmd := exec.Command("go", "build", "-o", binPath, ".")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			buildErr = fmt.Errorf("go build: %w\n%s", err, out)
@@ -49,7 +63,7 @@ func runIn(t *testing.T, dir, pathEnv, name string, args ...string) string {
 	t.Helper()
 	resolved := name
 	if name == "strucrypt" {
-		resolved = filepath.Join(binDir, "strucrypt")
+		resolved = filepath.Join(binDir, binName)
 	}
 	cmd := exec.Command(resolved, args...)
 	cmd.Dir = dir
@@ -66,7 +80,7 @@ func runInExpectingError(t *testing.T, dir, pathEnv, name string, args ...string
 	t.Helper()
 	resolved := name
 	if name == "strucrypt" {
-		resolved = filepath.Join(binDir, "strucrypt")
+		resolved = filepath.Join(binDir, binName)
 	}
 	cmd := exec.Command(resolved, args...)
 	cmd.Dir = dir

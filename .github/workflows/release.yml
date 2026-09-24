@@ -1,0 +1,139 @@
+name: Release
+
+# Runs the full spec-10 build/verify pipeline on every push and PR, and
+# additionally publishes a GitHub Release when a `vX.Y.Z` tag is pushed.
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# Third-party actions are pinned to a commit SHA, not a floating tag, so a
+# compromised upstream tag can't silently change what runs in this
+# pipeline — the version comment is for humans only.
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./... -v -timeout 120s
+
+  # spec 10 AC-10.3: build the binary and run init + add + a round-trip
+  # git add/checkout in a scratch repo, verifying decrypted content
+  # matches the original — natively, on each target OS (not emulated).
+  smoke:
+    name: Smoke (${{ matrix.os }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go test ./cmd/strucrypt/... -run TestEndToEndWholeFileHappyPath -v -timeout 120s
+
+  # spec 10 AC-10.1: the linux/amd64 build must have no dynamic dependency
+  # beyond baseline glibc, and run correctly inside a minimal UBI
+  # container with no extra packages installed.
+  ubi-check:
+    name: UBI minimal (linux/amd64)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build static linux/amd64 binary
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o strucrypt-linux-amd64 ./cmd/strucrypt
+      - name: Confirm no dynamic dependencies
+        run: |
+          set -euo pipefail
+          if file strucrypt-linux-amd64 | grep -qi "dynamically linked"; then
+            echo "binary is dynamically linked, expected fully static (CGO_ENABLED=0)" >&2
+            exit 1
+          fi
+      - name: Run inside registry.access.redhat.com/ubi9/ubi-minimal
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work \
+            registry.access.redhat.com/ubi9/ubi-minimal:latest \
+            ./strucrypt-linux-amd64 version
+
+  # spec 10 AC-10.1, AC-10.2, AC-10.4: every target below is a single `go
+  # build` invocation on one runner — no per-platform build environment
+  # and no cross C toolchain, since CGO_ENABLED=0 throughout.
+  release:
+    name: Build & publish release
+    needs: [test, smoke, ubi-check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Cross-compile all targets
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME:-dev}"
+          mkdir -p dist
+
+          build() {
+            os="$1"; arch="$2"; ext="$3"
+            name="strucrypt_${version}_${os}_${arch}"
+            outdir="dist/${name}"
+            mkdir -p "$outdir"
+            echo "building ${os}/${arch}"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+              go build -trimpath -ldflags="-s -w -X main.version=${version}" \
+              -o "${outdir}/strucrypt${ext}" ./cmd/strucrypt
+            if [ "$os" = "windows" ]; then
+              (cd dist && zip -rq "${name}.zip" "${name}")
+            else
+              tar -czf "dist/${name}.tar.gz" -C dist "${name}"
+            fi
+            rm -rf "$outdir"
+          }
+
+          build linux   amd64 ""
+          build linux   arm64 ""
+          build darwin  amd64 ""
+          build darwin  arm64 ""
+          build windows amd64 ".exe"
+
+      - name: Checksums
+        run: (cd dist && sha256sum -- *.tar.gz *.zip > checksums.txt)
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: strucrypt-release
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          generate_release_notes: true

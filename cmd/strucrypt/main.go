@@ -5,6 +5,10 @@ import (
 	"os"
 )
 
+// version is set at release build time via -ldflags "-X main.version=...".
+// A plain `go build` (local dev) leaves it at "dev".
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -21,6 +25,8 @@ func main() {
 		err = runClean(os.Args[2:])
 	case "smudge":
 		err = runSmudge(os.Args[2:])
+	case "version":
+		fmt.Println("strucrypt", version)
 	default:
 		usage()
 		os.Exit(2)
@@ -37,5 +43,6 @@ func usage() {
   strucrypt init [password]      bootstrap or join a repo
   strucrypt add <glob>           register a whole-file rule
   strucrypt clean <path>         (invoked by git) encrypt stdin to stdout
-  strucrypt smudge <path>        (invoked by git) decrypt stdin to stdout`)
+  strucrypt smudge <path>        (invoked by git) decrypt stdin to stdout
+  strucrypt version              print the build version`)
 }

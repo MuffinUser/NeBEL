@@ -40,7 +40,10 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
-  strucrypt init [password]      bootstrap or join a repo
+  strucrypt init [--password-stdin]
+                                 bootstrap or join a repo. The password is
+                                 read from $STRUCRYPT_PASSWORD, from stdin
+                                 with --password-stdin, or prompted for
   strucrypt add <glob>           register a whole-file rule
   strucrypt clean <path>         (invoked by git) encrypt stdin to stdout
   strucrypt smudge <path>        (invoked by git) decrypt stdin to stdout

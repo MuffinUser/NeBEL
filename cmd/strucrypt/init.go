@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/MarwinMoellers/strucrypt/internal/config"
 	"github.com/MarwinMoellers/strucrypt/internal/gitutil"
@@ -15,12 +16,9 @@ import (
 // runInit implements `strucrypt init [password]`, auto-detecting bootstrap
 // vs. join mode by whether .strucrypt.yaml already exists (spec 07).
 func runInit(args []string) error {
-	if len(args) > 1 {
-		return fmt.Errorf("usage: strucrupt init [password]")
-	}
-	var password string
-	if len(args) == 1 {
-		password = args[0]
+	input, err := parseInitArgs(args)
+	if err != nil {
+		return err
 	}
 
 	root, err := gitutil.RepoRoot()
@@ -29,10 +27,40 @@ func runInit(args []string) error {
 	}
 	configPath := filepath.Join(root, config.FileName)
 
-	if config.Exists(configPath) {
+	// Join mode needs a password and prompts for one if no source supplied
+	// it; bootstrap mode generates one instead (AC-7.2).
+	joining := config.Exists(configPath)
+	password, err := input.resolve(joining)
+	if err != nil {
+		return err
+	}
+
+	if joining {
 		return joinRepo(root, configPath, password)
 	}
 	return bootstrapRepo(root, configPath, password)
+}
+
+const initUsage = "usage: strucrypt init [--password-stdin] [password]"
+
+func parseInitArgs(args []string) (passwordInput, error) {
+	var input passwordInput
+	positional := 0
+	for _, arg := range args {
+		switch {
+		case arg == "--password-stdin":
+			input.fromStdin = true
+		case strings.HasPrefix(arg, "-"):
+			return input, fmt.Errorf("unknown flag %q\n%s", arg, initUsage)
+		default:
+			positional++
+			if positional > 1 {
+				return input, fmt.Errorf("%s", initUsage)
+			}
+			input.arg = arg
+		}
+	}
+	return input, nil
 }
 
 func bootstrapRepo(root, configPath, password string) error {
@@ -92,11 +120,10 @@ func bootstrapRepo(root, configPath, password string) error {
 	return nil
 }
 
+// joinRepo is reached with a non-empty password: runInit resolves one from
+// the environment, stdin, an argument, or an interactive prompt before
+// deciding which mode to run.
 func joinRepo(root, configPath, password string) error {
-	if password == "" {
-		return fmt.Errorf("this repo already has a %s — pass the shared password: strucrypt init <password>", config.FileName)
-	}
-
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err

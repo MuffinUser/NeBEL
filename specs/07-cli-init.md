@@ -14,8 +14,8 @@ USER_INTERACTIONS.md § 1.
 - **AC-7.2**: with no password argument, a strong random passphrase is
   generated and printed exactly once; it is not written to disk anywhere
   in the repo.
-- **AC-7.3**: `--password <value>` uses the supplied password instead of
-  generating one.
+- **AC-7.3**: a password supplied by the user (see § Password input) is
+  used instead of generating one.
 - **AC-7.4**: the generated/derived key correctly decrypts the config's
   own canary value immediately after bootstrap (self-consistency check).
 - **AC-7.5**: bootstrap registers the local git filter
@@ -36,8 +36,23 @@ USER_INTERACTIONS.md § 1.
   already-initialized clone is a safe no-op (no error, no duplicate
   config entries, filter registration unchanged).
 
-### CI / non-interactive
+### Password input
 
-- **AC-7.10**: `init "$PASSWORD"` (password as an argument, sourced from
-  an env var by the caller) completes with no TTY interaction required —
-  usable in a CI job.
+The password must be able to reach `init` without ever appearing in the
+command line: `argv` is world-readable on Linux (`/proc/<pid>/cmdline`), so
+an argument leaks the shared password to every other user on the machine,
+and to shell history and CI log echoes.
+
+Sources are consulted in order of decreasing safety: `--password-stdin`,
+then `$STRUCRYPT_PASSWORD`, then a positional argument, then an interactive
+prompt.
+
+- **AC-7.10**: `$STRUCRYPT_PASSWORD` supplies the password with no TTY
+  interaction required — the supported CI path.
+- **AC-7.11**: `--password-stdin` reads the password from stdin, stripping
+  a single trailing line ending, so it can be piped from a secret store.
+- **AC-7.12**: a positional password argument still works, so existing
+  jobs keep running, but prints a warning naming the exposure.
+- **AC-7.13**: in join mode with no password from any source, `init`
+  prompts on a terminal with echo disabled; with no terminal it fails,
+  naming the alternatives, and registers nothing.

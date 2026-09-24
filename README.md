@@ -15,7 +15,7 @@ Grab an archive from
 **macOS** (use `amd64` instead of `arm64` on Intel):
 
 ```sh
-VERSION=v0.1.0
+VERSION=v0.1.1
 curl -LO "https://github.com/MarwinMoellers/strucrypt/releases/download/${VERSION}/strucrypt_${VERSION}_darwin_arm64.tar.gz"
 tar -xzf "strucrypt_${VERSION}_darwin_arm64.tar.gz"
 sudo mv "strucrypt_${VERSION}_darwin_arm64/strucrypt" /usr/local/bin/
@@ -26,7 +26,7 @@ xattr -d com.apple.quarantine /usr/local/bin/strucrypt
 **Windows** (PowerShell; reopen your terminal afterwards for `PATH`):
 
 ```powershell
-$Version = 'v0.1.0'
+$Version = 'v0.1.1'
 $Dest    = "$env:LOCALAPPDATA\Programs\strucrypt"
 Invoke-WebRequest "https://github.com/MarwinMoellers/strucrypt/releases/download/$Version/strucrypt_${Version}_windows_amd64.zip" -OutFile "$env:TEMP\s.zip"
 Expand-Archive "$env:TEMP\s.zip" -DestinationPath $env:TEMP -Force
@@ -57,10 +57,20 @@ git add . && git commit -m "encrypt secrets"
 `.strucrypt.yaml` and `.gitattributes` are committed and shared; the password
 is not — distribute it to your team out of band.
 
-Join an existing repo, after cloning:
+Join an existing repo, after cloning — `init` prompts for the shared
+password:
 
 ```sh
-strucrypt init '<the shared password>'
+strucrypt init
+```
+
+Don't pass the password as an argument: it would be readable by other users
+on the machine, via the process list. Non-interactively, use the environment
+or stdin instead:
+
+```sh
+STRUCRYPT_PASSWORD="$SECRET" strucrypt init   # CI
+get-secret strucrypt | strucrypt init --password-stdin
 ```
 
 A clone that never runs `init` still works normally — `clone`, `pull`,
@@ -71,7 +81,7 @@ disk.
 
 | Command | What it does |
 | --- | --- |
-| `strucrypt init [password]` | Bootstrap a repo, or join one with the shared password |
+| `strucrypt init [--password-stdin]` | Bootstrap a repo, or join one with the shared password |
 | `strucrypt add <glob>` | Register a whole-file encryption rule |
 | `strucrypt version` | Print the build version |
 

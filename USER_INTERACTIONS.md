@@ -28,7 +28,7 @@ Local filter registered. You're ready to use git normally.
 ```
 
 - If no password is given, one is generated (strong random passphrase).
-- `--password <value>` lets the user supply their own instead.
+- To supply your own instead, see § Password input below.
 - Writes the committed config (`.strucrypt.yaml`) with: the Argon2id salt
   (not secret), an empty/example rule set, and a **canary value** — a
   well-known constant string encrypted under the derived key
@@ -40,7 +40,8 @@ Local filter registered. You're ready to use git normally.
 ### Join mode — `.strucrypt.yaml` already exists (clone of an existing repo)
 
 ```
-$ strucrypt init 'correct-horse-battery-staple-9f3a'
+$ strucrypt init
+Password:
 Password verified.
 Local filter registered.
 Re-checking out managed files...
@@ -57,16 +58,34 @@ Done. 3 files decrypted locally.
   the hood), since files matching the filter were smudged as ciphertext
   passthrough at clone time, before the filter was registered.
 
+### Password input
+
+The password never has to appear on the command line — `argv` is
+world-readable on Linux, so an argument exposes the shared password to
+every other user on the machine, and to shell history and CI logs.
+Sources, in order of precedence:
+
+1. `--password-stdin` — read from stdin, for piping out of a secret store.
+2. `$STRUCRYPT_PASSWORD` — the recommended CI path.
+3. A positional argument — still accepted so existing jobs keep working,
+   but warns about the exposure.
+4. An interactive prompt with echo disabled, when join mode needs a
+   password and nothing else supplied one.
+
 ### CI usage
 
-Same command, non-interactive:
+Same command, non-interactive — export the password from the CI platform's
+own secret store and run this once, before any step that needs cleartext:
 
 ```
-strucrypt init "$STRUCRYPT_PASSWORD"
+STRUCRYPT_PASSWORD="$SECRET" strucrypt init
 ```
 
-run once at the start of a CI job (password sourced from the CI
-platform's own secret store), before any step that needs cleartext.
+or pipe it in, without putting it in the environment either:
+
+```
+get-secret strucrypt | strucrypt init --password-stdin
+```
 
 ## 2. `strucrypt add <glob> [--field <path>]`
 

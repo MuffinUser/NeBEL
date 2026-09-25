@@ -4,6 +4,19 @@ Encrypt secrets in place so they can live safely in the git repo, with
 transparent local decryption. Encryption happens on `git add`, decryption on
 checkout, via git's clean/smudge filter driver — day to day you just use git.
 
+## Foreword
+This tool is derived from Tools like [git-crypt](https://github.com/agwa/git-crypt) and [transcrypt](https://github.com/elasticdog/transcrypt). 
+The Concept for inplace encryption is derived from [SOPS](https://github.com/getsops/sops).
+
+### Advantages
+This Tool is written in go. Making it easy to run on all Platforms(MacOS, Windows, Linux). This is where git-crypt and transcrypt struggle.
+The Transparent inplace Encryption enables useful Merges within a File. Beacaus git-crypt and transcrypt only encrypt the whole file. 
+
+### Things to Concider
+At the Moment only Symetric-Encryption is provided. You have to Roate Keys on your own.
+This Project is entirely Vibe Coded. At best changes are peer-reviewed by a human.
+The only thing written by a Human is this Foreword. So take it for what it is.
+
 ## Install
 
 One static binary, which **must be on your `PATH`** — git invokes it by name
@@ -24,7 +37,15 @@ New-Item -ItemType Directory -Force -Path $Dest | Out-Null
 Copy-Item "$env:TEMP\strucrypt-install\*\strucrypt.exe" $Dest -Force
 [Environment]::SetEnvironmentVariable('Path',
   [Environment]::GetEnvironmentVariable('Path', 'User') + ";$Dest", 'User')
+
+# Git Bash (incl. IntelliJ's) reads PATH from ~/.bash_profile, not the
+# Windows PATH above.
+$Posix = '/' + $Dest.Substring(0,1).ToLower() + $Dest.Substring(2).Replace('\','/')
+Add-Content "$HOME\.bash_profile" "`nexport PATH=`"`$PATH:$Posix`""
 ```
+
+Then **fully restart IntelliJ** (File > Exit, not just closing the
+project) — it keeps the PATH it had when it started.
 
 **macOS** (`amd64` instead of `arm64` on Intel):
 

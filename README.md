@@ -73,6 +73,15 @@ A clone that never runs `init` still works normally — `clone`, `pull`,
 `commit`, and `push` all succeed, the managed files just stay encrypted on
 disk.
 
+`init` reports how many files it decrypted on join (`Done. 3 files decrypted
+locally.`). If it reports zero, the password was still correct, but nothing
+in the repo is wired to the filter — almost always a `.gitattributes` that
+was never committed. Check with:
+
+```sh
+git check-attr filter -- <path>   # should report "filter: strucrypt"
+```
+
 ## Commands
 
 | Command | What it does |

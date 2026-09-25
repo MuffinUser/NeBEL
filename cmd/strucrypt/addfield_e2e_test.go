@@ -165,3 +165,63 @@ func TestAddRequiresSubcommand(t *testing.T) {
 		}
 	}
 }
+
+// Joining a repo whose .gitattributes was never committed leaves every
+// value encrypted: git has no filter assignment, so smudge never runs.
+// The password is correct and the key registers fine, so without a count
+// this is indistinguishable from a successful join — init has to say that
+// it decrypted nothing, and why.
+func TestJoinReportsWhenNothingIsFilterManaged(t *testing.T) {
+	pathEnv := pathEnvWithBin(t)
+	origin := setupValueRepo(t, pathEnv)
+	runIn(t, origin, pathEnv, "strucrypt", "add", "field", "config/staging.yaml", "database.password")
+
+	// Commit everything except .gitattributes.
+	runIn(t, origin, pathEnv, "git", "add", ".strucrypt.yaml", "config/staging.yaml")
+	runIn(t, origin, pathEnv, "git", "commit", "-q", "-m", "without .gitattributes")
+
+	cloneDir := t.TempDir()
+	clone := filepath.Join(cloneDir, "clone")
+	runIn(t, cloneDir, pathEnv, "git", "clone", "-q", origin, clone)
+
+	out, err := runInitWith(t, clone, pathEnv, []string{passwordEnv + "=value-mode-password"}, "")
+	if err != nil {
+		t.Fatalf("join: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "no filter-managed files") {
+		t.Errorf("join decrypted nothing but did not say so:\n%s", out)
+	}
+	if !strings.Contains(out, gitattributesName) {
+		t.Errorf("the hint does not name %s:\n%s", gitattributesName, out)
+	}
+}
+
+// The normal case reports how many files it decrypted, so a join that
+// silently covered fewer files than expected is visible.
+func TestJoinReportsDecryptedCount(t *testing.T) {
+	pathEnv := pathEnvWithBin(t)
+	origin := setupValueRepo(t, pathEnv)
+	runIn(t, origin, pathEnv, "strucrypt", "add", "field", "config/staging.yaml", "database.password")
+	runIn(t, origin, pathEnv, "git", "add", ".")
+	runIn(t, origin, pathEnv, "git", "commit", "-q", "-m", "encrypt")
+
+	cloneDir := t.TempDir()
+	clone := filepath.Join(cloneDir, "clone")
+	runIn(t, cloneDir, pathEnv, "git", "clone", "-q", origin, clone)
+
+	out, err := runInitWith(t, clone, pathEnv, []string{passwordEnv + "=value-mode-password"}, "")
+	if err != nil {
+		t.Fatalf("join: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "1 file decrypted") {
+		t.Errorf("join did not report the decrypted count:\n%s", out)
+	}
+
+	got, err := os.ReadFile(filepath.Join(clone, "config", "staging.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), `password: "s3cr3t"`) {
+		t.Errorf("value was not decrypted after join:\n%s", got)
+	}
+}

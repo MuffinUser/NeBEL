@@ -148,10 +148,22 @@ func joinRepo(root, configPath, password string) error {
 	fmt.Println("Password verified.")
 	fmt.Println("Local filter registered.")
 	fmt.Println("Re-checking out managed files...")
-	if err := gitutil.CheckoutAll(root); err != nil {
+	decrypted, err := gitutil.CheckoutAll(root)
+	if err != nil {
 		return fmt.Errorf("re-checking out files: %w", err)
 	}
-	fmt.Println("Done.")
+	if decrypted == 0 {
+		// The password was right, so the key is fine — but nothing in the
+		// repository is wired to the filter. Almost always a
+		// .gitattributes that was never committed, which otherwise looks
+		// exactly like a successful join that decrypted nothing.
+		fmt.Printf("Done, but no filter-managed files were found.\n"+
+			"  Check that %s is committed and lists your patterns:\n"+
+			"    git check-attr filter -- <path>   should report \"filter: strucrypt\"\n",
+			gitattributesName)
+		return nil
+	}
+	fmt.Printf("Done. %s decrypted locally.\n", plural(decrypted, "file"))
 	return nil
 }
 
@@ -171,4 +183,12 @@ func generatePassword() string {
 	b := make([]byte, 24)
 	rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// plural renders a count with its noun: "1 file", "3 files".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }

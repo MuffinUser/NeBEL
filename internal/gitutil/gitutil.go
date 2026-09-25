@@ -56,18 +56,18 @@ func ConfigSet(key, value string) error {
 // file whose working tree content git believes already matches the index,
 // even with --force. Deleting the file first removes that shortcut — git
 // has no choice but to recreate it from the index, through the filter.
-func CheckoutAll(repoRoot string) error {
+func CheckoutAll(repoRoot string) (int, error) {
 	files, err := filterManagedFiles(repoRoot)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(files) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	for _, f := range files {
 		if err := os.Remove(filepath.Join(repoRoot, f)); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("gitutil: removing %s before re-checkout: %w", f, err)
+			return 0, fmt.Errorf("gitutil: removing %s before re-checkout: %w", f, err)
 		}
 	}
 
@@ -75,9 +75,9 @@ func CheckoutAll(repoRoot string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoRoot
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("gitutil: git checkout: %w: %s", wrapExitErr(err), strings.TrimSpace(string(out)))
+		return 0, fmt.Errorf("gitutil: git checkout: %w: %s", wrapExitErr(err), strings.TrimSpace(string(out)))
 	}
-	return nil
+	return len(files), nil
 }
 
 // filterManagedFiles returns the repo-relative paths of every tracked file

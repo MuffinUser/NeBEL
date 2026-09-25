@@ -6,43 +6,38 @@ checkout, via git's clean/smudge filter driver — day to day you just use git.
 
 ## Install
 
-A single static binary, which **must be on your `PATH`** — git invokes it by
-name (`strucrypt clean %f`) on every staged or checked-out managed file.
-Grab an archive from
-[Releases](https://github.com/MarwinMoellers/strucrypt/releases) and set
-`VERSION` below to match.
+One static binary, which **must be on your `PATH`** — git invokes it by name
+(`strucrypt clean %f`). Get the archive onto the machine however you like
+(from [Releases](https://github.com/MarwinMoellers/strucrypt/releases), a
+share, a USB stick); the steps below install from that local file and need
+no internet. Adjust the filename to your version.
 
-**macOS** (use `amd64` instead of `arm64` on Intel):
-
-```sh
-VERSION=v0.2.0
-curl -LO "https://github.com/MarwinMoellers/strucrypt/releases/download/${VERSION}/strucrypt_${VERSION}_darwin_arm64.tar.gz"
-tar -xzf "strucrypt_${VERSION}_darwin_arm64.tar.gz"
-sudo mv "strucrypt_${VERSION}_darwin_arm64/strucrypt" /usr/local/bin/
-# The binaries aren't code-signed; if Gatekeeper blocks it:
-xattr -d com.apple.quarantine /usr/local/bin/strucrypt
-```
-
-**Windows** (PowerShell; reopen your terminal afterwards for `PATH`):
+**Windows** (PowerShell), then open a new terminal:
 
 ```powershell
-$Version = 'v0.2.0'
-$Dest    = "$env:LOCALAPPDATA\Programs\strucrypt"
-Invoke-WebRequest "https://github.com/MarwinMoellers/strucrypt/releases/download/$Version/strucrypt_${Version}_windows_amd64.zip" -OutFile "$env:TEMP\s.zip"
-Expand-Archive "$env:TEMP\s.zip" -DestinationPath $env:TEMP -Force
+$Zip  = "$HOME\Downloads\strucrypt_v0.2.0_windows_amd64.zip"
+$Dest = "$env:LOCALAPPDATA\Programs\strucrypt"
+
+Unblock-File $Zip     # clears the "downloaded from the internet" mark
+Expand-Archive $Zip -DestinationPath $env:TEMP\strucrypt-install -Force
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
-Move-Item "$env:TEMP\strucrypt_${Version}_windows_amd64\strucrypt.exe" $Dest -Force
-setx PATH "$env:PATH;$Dest"
+Copy-Item "$env:TEMP\strucrypt-install\*\strucrypt.exe" $Dest -Force
+[Environment]::SetEnvironmentVariable('Path',
+  [Environment]::GetEnvironmentVariable('Path', 'User') + ";$Dest", 'User')
 ```
 
-**From source**, into `$(go env GOPATH)/bin`:
+**macOS** (`amd64` instead of `arm64` on Intel):
 
 ```sh
-go install github.com/MarwinMoellers/strucrypt/cmd/strucrypt@latest
+tar -xzf ~/Downloads/strucrypt_v0.2.0_darwin_arm64.tar.gz -C /tmp
+sudo mv /tmp/strucrypt_*_darwin_*/strucrypt /usr/local/bin/
+xattr -d com.apple.quarantine /usr/local/bin/strucrypt   # if Gatekeeper blocks it
 ```
 
-Check it worked with `strucrypt version`. Each release also ships
-`checksums.txt` if you want to verify the download.
+**From source**: `go build -o strucrypt ./cmd/strucrypt`, then move it onto
+your `PATH`.
+
+Check with `strucrypt version`.
 
 ## Quick start
 

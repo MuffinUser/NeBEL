@@ -45,9 +45,24 @@ type Handler interface {
 	// Locate returns the span of the scalar at path.
 	Locate(src []byte, path string) (Span, error)
 
+	// Leaves lists every scalar in the document, in source order, with
+	// the dot-path that selects it. It is what `strucrypt add field`
+	// offers to pick from, so a user never has to hand-write a path.
+	Leaves(src []byte) ([]Leaf, error)
+
 	// Render returns the literal source text for a value of type t —
 	// quoting it if the format requires quotes for that type.
 	Render(value string, t tag.Type) string
+}
+
+// Leaf is one scalar in a document, addressable by Path.
+type Leaf struct {
+	// Path is the dot-notation path that selects this scalar.
+	Path string
+
+	// Value is the scalar's decoded content, and Type its native type.
+	Value string
+	Type  tag.Type
 }
 
 // For returns the handler for a file path, chosen by extension.
@@ -87,4 +102,17 @@ func Splice(src []byte, edits []Edit) ([]byte, error) {
 		prev = e.Span.End
 	}
 	return append(out, src[prev:]...), nil
+}
+
+// joinPath appends one step to a dot-path, using bracket syntax for
+// sequence indices: "api" + "keys" + 0 renders as "api.keys[0]".
+func joinPath(parent, key string) string {
+	if parent == "" {
+		return key
+	}
+	return parent + "." + key
+}
+
+func indexPath(parent string, i int) string {
+	return fmt.Sprintf("%s[%d]", parent, i)
 }

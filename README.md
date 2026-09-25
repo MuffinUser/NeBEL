@@ -44,8 +44,9 @@ Check with `strucrypt version`.
 Set up a repo (first person to introduce strucrypt):
 
 ```sh
-strucrypt init                 # generates a password — store it now
-strucrypt add "secrets/*.pem"  # register what to encrypt
+strucrypt init                          # generates a password — store it now
+strucrypt add file "secrets/*.pem"      # encrypt whole files
+strucrypt add field config/app.yaml     # or pick values to encrypt, interactively
 git add . && git commit -m "encrypt secrets"
 ```
 
@@ -77,7 +78,8 @@ disk.
 | Command | What it does |
 | --- | --- |
 | `strucrypt init [--password-stdin]` | Bootstrap a repo, or join one with the shared password |
-| `strucrypt add <glob>` | Register a whole-file encryption rule |
+| `strucrypt add file <glob>` | Encrypt whole files matching a glob |
+| `strucrypt add field <file> [path...]` | Encrypt named values inside a file; with no paths, pick them interactively |
 | `strucrypt version` | Print the build version |
 
 `strucrypt clean` and `strucrypt smudge` exist for git to call; you never run

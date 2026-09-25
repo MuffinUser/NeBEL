@@ -88,38 +88,58 @@ or pipe it in, without putting it in the environment either:
 get-secret strucrypt | strucrypt init --password-stdin
 ```
 
-## 2. `strucrypt add <glob> [--field <path>]`
+## 2. `strucrypt add file` / `strucrypt add field`
 
-Registers a new file pattern (and, optionally, a specific field) in the
-committed rules config — the only manual step needed when a new secret
-file or field shows up, since selection is pattern/exact-key based, not
-automatic.
+Two subcommands, because they register two different kinds of rule.
+
+### `add file <glob>` — whole-file mode
+
+For blobs with no readable structure: certificates, keyrings, dumps.
 
 ```
-# New file, whole-file mode
-$ strucrypt add "secrets/*.pem"
+$ strucrypt add file "secrets/*.pem"
 Added rule: secrets/*.pem (mode: file)
-
-# New file, per-value mode with one field
-$ strucrypt add "config/staging.yaml" --field "database.password"
-Added rule: config/staging.yaml (mode: value)
-  encrypt: [database.password]
-
-# Adding another field to an existing per-value rule
-$ strucrypt add "config/staging.yaml" --field "api.token"
-Updated rule: config/staging.yaml
-  encrypt: [database.password, api.token]
 ```
 
-- No `--field` → whole-file mode rule.
-- `--field` (repeatable) → per-value mode; appends to the pattern's
-  `encrypt` list if a rule for that pattern already exists.
-- Idempotent: re-running with the same glob/field is a no-op.
-- After running, the normal `git add`/`git commit` flow picks up the new
-  rule automatically — no further manual step.
-- If a new file just matches an **existing** glob pattern already in
-  `.strucrypt.yaml`, no command is needed at all — it's covered
-  automatically.
+### `add field <file> [path...]` — per-value mode
+
+For config you still want to read and diff in git. Paths are dot notation
+with array indices; quote them, or the shell will eat the brackets.
+
+```
+$ strucrypt add field config/staging.yaml database.password 'api.keys[0]'
+Added to rule config/staging.yaml (mode: value):
+  database.password
+  api.keys[0]
+```
+
+With no paths, the file's values are listed to choose from — so nobody has
+to hand-write dot notation for a deeply nested key:
+
+```
+$ strucrypt add field config/staging.yaml
+Values in config/staging.yaml:
+
+   1) database.host                            "db.internal"
+   2) database.password                        "s3cr3t"
+   3) database.port                            5432
+   4) api.keys[0]                              "alpha"
+   5) api.token                                "tok_live_abcdefghijklmnopqrstuvwxyz0123…"
+
+Encrypt which? (numbers, e.g. "1 3"; "all"; empty to cancel): 2 5
+Added to rule config/staging.yaml (mode: value):
+  database.password
+  api.token
+```
+
+- Values already encrypted, or already in the rule, are not offered.
+- Every path is checked against the file before the rule is written, so a
+  typo fails here rather than on whoever next stages the file.
+- Re-running with the same paths is a no-op.
+- Supported formats: YAML and JSON. `.env` and `.properties` are not
+  implemented yet.
+- Both subcommands also add the pattern to `.gitattributes`. After that the
+  normal `git add`/`git commit` flow picks the rule up — no further step.
 
 ## 3. `strucrypt status`
 

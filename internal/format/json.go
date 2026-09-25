@@ -172,3 +172,63 @@ func delimName(d json.Delim) string {
 	}
 	return "array"
 }
+
+// Leaves walks the document collecting every scalar and the path that
+// selects it.
+func (jsonHandler) Leaves(src []byte) ([]Leaf, error) {
+	dec := json.NewDecoder(bytes.NewReader(src))
+	dec.UseNumber()
+
+	var leaves []Leaf
+	var walk func(path string) error
+	walk = func(path string) error {
+		before := dec.InputOffset()
+		tk, err := dec.Token()
+		if err != nil {
+			return fmt.Errorf("format: parsing JSON: %w", err)
+		}
+
+		switch tk {
+		case json.Delim('{'):
+			for dec.More() {
+				key, err := dec.Token()
+				if err != nil {
+					return fmt.Errorf("format: parsing JSON: %w", err)
+				}
+				name, ok := key.(string)
+				if !ok {
+					return fmt.Errorf("format: parsing JSON: object key is not a string")
+				}
+				if err := walk(joinPath(path, name)); err != nil {
+					return err
+				}
+			}
+			_, err := dec.Token() // closing brace
+			return err
+		case json.Delim('['):
+			for i := 0; dec.More(); i++ {
+				if err := walk(indexPath(path, i)); err != nil {
+					return err
+				}
+			}
+			_, err := dec.Token() // closing bracket
+			return err
+		}
+
+		if path == "" {
+			return nil // a bare scalar document has no addressable path
+		}
+		span, err := jsonSpan(src, before, dec.InputOffset(), tk)
+		if err != nil {
+			// null and other unencryptable scalars are simply not offered.
+			return nil
+		}
+		leaves = append(leaves, Leaf{Path: path, Value: span.Value, Type: span.Type})
+		return nil
+	}
+
+	if err := walk(""); err != nil {
+		return nil, err
+	}
+	return leaves, nil
+}

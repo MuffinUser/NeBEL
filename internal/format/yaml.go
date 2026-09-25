@@ -34,7 +34,13 @@ func (yamlHandler) Locate(src []byte, path string) (Span, error) {
 	for i, step := range steps {
 		node, err = yamlStep(node, step)
 		if err != nil {
-			return Span{}, fmt.Errorf("%w: %q at %q", ErrNotFound, path, strings.Join(pathPrefix(steps, i+1), ""))
+			// Name the deepest component that did resolve, so a typo in a
+			// long path points at the step that broke rather than the
+			// whole string.
+			if failed := strings.Join(pathPrefix(steps, i+1), ""); failed != path {
+				return Span{}, fmt.Errorf("%w: %q (no %q)", ErrNotFound, path, failed)
+			}
+			return Span{}, fmt.Errorf("%w: %q", ErrNotFound, path)
 		}
 	}
 
@@ -172,4 +178,41 @@ func pathPrefix(steps []Step, n int) []string {
 		}
 	}
 	return parts
+}
+
+// Leaves walks the document collecting every scalar and the path that
+// selects it.
+func (yamlHandler) Leaves(src []byte) ([]Leaf, error) {
+	file, err := parser.ParseBytes(src, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("format: parsing YAML: %w", err)
+	}
+	if len(file.Docs) == 0 || file.Docs[0].Body == nil {
+		return nil, nil
+	}
+
+	var leaves []Leaf
+	var walk func(node ast.Node, path string)
+	walk = func(node ast.Node, path string) {
+		switch n := node.(type) {
+		case *ast.MappingNode:
+			for _, pair := range n.Values {
+				walk(pair.Value, joinPath(path, pair.Key.GetToken().Value))
+			}
+		case *ast.MappingValueNode:
+			walk(n.Value, joinPath(path, n.Key.GetToken().Value))
+		case *ast.SequenceNode:
+			for i, item := range n.Values {
+				walk(item, indexPath(path, i))
+			}
+		case ast.ScalarNode:
+			// A scalar at the document root has no path to address it by.
+			if path != "" {
+				tk := n.GetToken()
+				leaves = append(leaves, Leaf{Path: path, Value: tk.Value, Type: yamlType(tk)})
+			}
+		}
+	}
+	walk(file.Docs[0].Body, "")
+	return leaves, nil
 }

@@ -29,7 +29,7 @@ func setupEncryptedOrigin(t *testing.T, pathEnv, password string) (string, strin
 	if out, err := runInitWith(t, origin, pathEnv, []string{passwordEnv + "=" + password}, ""); err != nil {
 		t.Fatalf("bootstrap: %v\n%s", err, out)
 	}
-	runIn(t, origin, pathEnv, "strucrypt", "add", "secrets/*.pem")
+	runIn(t, origin, pathEnv, "strucrypt", "add", "file", "secrets/*.pem")
 
 	if err := os.MkdirAll(filepath.Join(origin, "secrets"), 0o755); err != nil {
 		t.Fatal(err)

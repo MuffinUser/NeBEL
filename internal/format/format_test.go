@@ -279,3 +279,58 @@ func TestForUnsupportedExtension(t *testing.T) {
 		t.Errorf("For() error = %v, want %v", err, ErrUnsupportedFormat)
 	}
 }
+
+// Leaves is what `strucrypt add field` offers to pick from, so it must
+// list every scalar — and only scalars — with a path that Locate accepts.
+func TestLeaves(t *testing.T) {
+	tests := []struct {
+		name, file, src string
+		want            []string
+	}{
+		{"yaml", "c.yaml", yamlDoc, []string{
+			"database.host", "database.password", "database.port", "database.ratio",
+			"database.replica", "api.keys[0]", "api.keys[1]", "api.token",
+		}},
+		{"json", "c.json", jsonDoc, []string{
+			"database.host", "database.password", "database.port", "database.ratio",
+			"database.replica", "api.keys[0]", "api.keys[1]",
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, err := For(tt.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			leaves, err := h.Leaves([]byte(tt.src))
+			if err != nil {
+				t.Fatalf("Leaves: %v", err)
+			}
+
+			var got []string
+			for _, leaf := range leaves {
+				got = append(got, leaf.Path)
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("Leaves() paths =\n %v\nwant\n %v", got, tt.want)
+			}
+
+			// Every offered path must actually resolve, or the picker
+			// would hand the user a path that fails at clean time.
+			for _, leaf := range leaves {
+				span, err := h.Locate([]byte(tt.src), leaf.Path)
+				if err != nil {
+					t.Errorf("Locate(%q) from Leaves: %v", leaf.Path, err)
+					continue
+				}
+				if span.Value != leaf.Value {
+					t.Errorf("%s: Leaves value %q, Locate value %q", leaf.Path, leaf.Value, span.Value)
+				}
+				if span.Type != leaf.Type {
+					t.Errorf("%s: Leaves type %q, Locate type %q", leaf.Path, leaf.Type, span.Type)
+				}
+			}
+		})
+	}
+}

@@ -26,7 +26,6 @@ First implementation pass covers **whole-file encryption only**. Per-value
 - `09-cli-status.md` — only the whole-file encrypted/PLAINTEXT reporting
   (AC-9.4); per-value ACs (9.3, 9.8) deferred.
 - `10-cross-platform-build.md` — full scope, unchanged.
-- `11-filter-registration.md` — full scope, unchanged.
 
 ## Suggested implementation order (dependency order)
 
@@ -40,7 +39,6 @@ First implementation pass covers **whole-file encryption only**. Per-value
 8. `08-cli-add.md` — register new files/fields
 9. `09-cli-status.md` — inspection/CI gate
 10. `10-cross-platform-build.md` — build/release
-11. `11-filter-registration.md` — how git is pointed at the binary
 
 Each later spec depends on all earlier ones being green. Within a spec
 file, ACs can usually be tested independently of each other.

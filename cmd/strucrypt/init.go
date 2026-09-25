@@ -155,18 +155,12 @@ func joinRepo(root, configPath, password string) error {
 	return nil
 }
 
-// registerFilter points this clone's local git config at the strucrypt
-// binary that is running right now, by absolute path — see
-// gitutil.FilterCommand for why a bare "strucrypt" on PATH is not enough.
 func registerFilter() error {
-	for _, sub := range []string{"clean", "smudge"} {
-		cmd, err := gitutil.SelfFilterCommand(sub)
-		if err != nil {
-			return err
-		}
-		if err := gitutil.ConfigSet("filter.strucrypt."+sub, cmd); err != nil {
-			return err
-		}
+	if err := gitutil.ConfigSet("filter.strucrypt.clean", "strucrypt clean %f"); err != nil {
+		return err
+	}
+	if err := gitutil.ConfigSet("filter.strucrypt.smudge", "strucrypt smudge %f"); err != nil {
+		return err
 	}
 	return gitutil.ConfigSet("filter.strucrypt.required", "true")
 }

@@ -20,7 +20,8 @@ USER_INTERACTIONS.md § 1.
   own canary value immediately after bootstrap (self-consistency check).
 - **AC-7.5**: bootstrap registers the local git filter
   (`git config --get filter.strucrypt.clean` / `.smudge` return the
-  expected commands afterward).
+  expected commands afterward). The command names the binary by absolute
+  path — see spec 11.
 
 ### Join mode (`.strucrypt.yaml` already exists)
 
@@ -33,8 +34,10 @@ USER_INTERACTIONS.md § 1.
   were left as ciphertext passthrough at clone time are re-checked-out and
   appear decrypted in the working tree.
 - **AC-7.9**: re-running `init` with the same correct password on an
-  already-initialized clone is a safe no-op (no error, no duplicate
-  config entries, filter registration unchanged).
+  already-initialized clone is safe and idempotent (no error, no
+  duplicate config entries). Filter registration is refreshed to the
+  running binary's absolute path, which is the documented repair for a
+  clone set up by an older version — see spec 11 AC-11.5.
 
 ### Password input
 

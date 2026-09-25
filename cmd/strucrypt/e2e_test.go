@@ -11,11 +11,10 @@ import (
 	"testing"
 )
 
-// binName is "strucrypt.exe" on Windows: git's filter driver invocation
-// (filter.strucrypt.clean = "strucrypt clean %f") is resolved by the shell
-// git uses internally, which follows PATHEXT — a bare extension-less
-// "strucrypt" on PATH is not guaranteed to resolve the same way a real
-// release binary (built with the .exe suffix) would.
+// binName is "strucrypt.exe" on Windows, matching what a real release
+// ships. The filter driver is registered by absolute path, so this name
+// is what gets recorded in git config and executed — an extension-less
+// binary would not be runnable there.
 var binName = "strucrypt"
 
 func init() {
@@ -30,8 +29,9 @@ func init() {
 // environment, not a child's cmd.Env, so a bare "strucrypt" name would
 // never be found via cmd.Env alone. Child processes we spawn (git, and
 // strucrypt's own git subprocess calls) still get binDir prepended to PATH
-// in their environment, since git itself must find "strucrypt" on PATH
-// when invoking the filter driver.
+// in their environment, so that these tests exercise the ordinary case
+// where the user can also type "strucrypt". Git itself no longer needs it
+// there — see TestFilterRunsWithStrucryptOffPath.
 var (
 	buildOnce sync.Once
 	binDir    string

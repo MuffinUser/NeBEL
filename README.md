@@ -15,7 +15,7 @@ no internet. Adjust the filename to your version.
 **Windows** (PowerShell), then open a new terminal:
 
 ```powershell
-$Zip  = "$HOME\Downloads\strucrypt_v0.2.0_windows_amd64.zip"
+$Zip  = "$HOME\Downloads\strucrypt_v0.3.0_windows_amd64.zip"
 $Dest = "$env:LOCALAPPDATA\Programs\strucrypt"
 
 Unblock-File $Zip     # clears the "downloaded from the internet" mark
@@ -29,7 +29,7 @@ Copy-Item "$env:TEMP\strucrypt-install\*\strucrypt.exe" $Dest -Force
 **macOS** (`amd64` instead of `arm64` on Intel):
 
 ```sh
-tar -xzf ~/Downloads/strucrypt_v0.2.0_darwin_arm64.tar.gz -C /tmp
+tar -xzf ~/Downloads/strucrypt_v0.3.0_darwin_arm64.tar.gz -C /tmp
 sudo mv /tmp/strucrypt_*_darwin_*/strucrypt /usr/local/bin/
 xattr -d com.apple.quarantine /usr/local/bin/strucrypt   # if Gatekeeper blocks it
 ```

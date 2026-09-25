@@ -1,9 +1,16 @@
 // Package tag encodes and decodes the inline ENC[...] marker used to store
 // an encrypted value in place.
 //
-// MVP scope: only the whole-file form, ENC[AES256_SIV,data:<base64>] — no
-// type field, since a whole-file blob has no native scalar type to
-// preserve. Per-value encoding (spec 03's type-preserving form) is deferred.
+// Two forms share one parser:
+//
+//	ENC[AES256_SIV,data:<base64>]            whole file (spec 06)
+//	ENC[AES256_SIV,data:<base64>,type:str]   one value (spec 03)
+//
+// The type field records the original scalar type so smudge can restore
+// `port: 5432` as an integer rather than the string "5432". A whole-file
+// blob has no native scalar type, so it carries no type field — and must
+// keep parsing without one, since that is the form already committed in
+// every repository created before per-value mode existed.
 package tag
 
 import (
@@ -15,6 +22,36 @@ import (
 
 // AlgoAES256SIV is the only algorithm identifier this build understands.
 const AlgoAES256SIV = "AES256_SIV"
+
+// Type is the native type of an encrypted scalar, recorded so decryption
+// can restore it. TypeNone marks a whole-file tag, which has none.
+type Type string
+
+const (
+	TypeNone  Type = ""
+	TypeStr   Type = "str"
+	TypeInt   Type = "int"
+	TypeFloat Type = "float"
+	TypeBool  Type = "bool"
+)
+
+// Valid reports whether t is a scalar type this build can restore.
+func (t Type) Valid() bool {
+	switch t {
+	case TypeStr, TypeInt, TypeFloat, TypeBool:
+		return true
+	}
+	return false
+}
+
+// Tag is a parsed ENC[...] marker.
+type Tag struct {
+	// Ciphertext is the raw sealed bytes from the data field.
+	Ciphertext []byte
+
+	// Type is the original scalar type, or TypeNone for a whole-file tag.
+	Type Type
+}
 
 const (
 	prefix = "ENC["
@@ -29,6 +66,10 @@ var (
 	// ErrUnsupportedAlgo is returned when a well-formed tag names an
 	// algorithm this build does not implement.
 	ErrUnsupportedAlgo = errors.New("tag: unsupported algorithm")
+
+	// ErrUnsupportedType is returned when a tag names a scalar type this
+	// build cannot restore.
+	ErrUnsupportedType = errors.New("tag: unsupported value type")
 )
 
 // IsEncrypted reports whether raw is already tagged as an encrypted value.
@@ -49,30 +90,59 @@ func Encode(ciphertext []byte) string {
 	return fmt.Sprintf("%s%s,data:%s%s", prefix, AlgoAES256SIV, base64.StdEncoding.EncodeToString(ciphertext), suffix)
 }
 
-// Decode parses a whole-file ENC[...] tag and returns the raw ciphertext.
-// It never panics: malformed input and unsupported algorithms are reported
-// as errors.
+// EncodeValue wraps ciphertext for a single scalar, recording the type the
+// plaintext had so Decrypt can restore it (spec 03 AC-3.1, AC-3.2).
+func EncodeValue(ciphertext []byte, t Type) string {
+	return fmt.Sprintf("%s%s,data:%s,type:%s%s", prefix, AlgoAES256SIV, base64.StdEncoding.EncodeToString(ciphertext), t, suffix)
+}
+
+// Decode parses a tag and returns just the ciphertext, ignoring any type
+// field. Used by the whole-file filter path, which has no type to restore.
 func Decode(raw string) ([]byte, error) {
+	parsed, err := Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	return parsed.Ciphertext, nil
+}
+
+// Parse parses either tag form. It never panics: malformed input,
+// unsupported algorithms, and unsupported types are reported as errors.
+func Parse(raw string) (Tag, error) {
 	if !strings.HasPrefix(raw, prefix) || !strings.HasSuffix(raw, suffix) {
-		return nil, fmt.Errorf("%w: missing %q...%q delimiters", ErrMalformed, prefix, suffix)
+		return Tag{}, fmt.Errorf("%w: missing %q...%q delimiters", ErrMalformed, prefix, suffix)
 	}
 	inner := raw[len(prefix) : len(raw)-len(suffix)]
 
-	algo, dataField, ok := strings.Cut(inner, ",")
+	algo, rest, ok := strings.Cut(inner, ",")
 	if !ok {
-		return nil, fmt.Errorf("%w: expected \"ALGO,data:<base64>\"", ErrMalformed)
+		return Tag{}, fmt.Errorf("%w: expected \"ALGO,data:<base64>\"", ErrMalformed)
 	}
 	if algo != AlgoAES256SIV {
-		return nil, fmt.Errorf("%w: %q", ErrUnsupportedAlgo, algo)
+		return Tag{}, fmt.Errorf("%w: %q", ErrUnsupportedAlgo, algo)
 	}
+
+	// The type field is optional: its absence means a whole-file tag.
+	dataField, typeField, hasType := strings.Cut(rest, ",")
 
 	b64, ok := strings.CutPrefix(dataField, "data:")
 	if !ok {
-		return nil, fmt.Errorf("%w: missing \"data:\" field", ErrMalformed)
+		return Tag{}, fmt.Errorf("%w: missing \"data:\" field", ErrMalformed)
 	}
 	ciphertext, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid base64 in data field: %v", ErrMalformed, err)
+		return Tag{}, fmt.Errorf("%w: invalid base64 in data field: %v", ErrMalformed, err)
 	}
-	return ciphertext, nil
+
+	parsed := Tag{Ciphertext: ciphertext}
+	if hasType {
+		value, ok := strings.CutPrefix(typeField, "type:")
+		if !ok {
+			return Tag{}, fmt.Errorf("%w: expected a \"type:\" field, got %q", ErrMalformed, typeField)
+		}
+		if parsed.Type = Type(value); !parsed.Type.Valid() {
+			return Tag{}, fmt.Errorf("%w: %q", ErrUnsupportedType, value)
+		}
+	}
+	return parsed, nil
 }

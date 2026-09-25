@@ -110,3 +110,48 @@ func TestDecodeRejectsUnsupportedAlgo(t *testing.T) {
 		t.Errorf("Decode() error = %v, want %v", err, ErrUnsupportedAlgo)
 	}
 }
+
+// AC-3.1: a value tag carries the scalar's original type alongside the
+// ciphertext.
+func TestEncodeValueRoundTrip(t *testing.T) {
+	for _, typ := range []Type{TypeStr, TypeInt, TypeFloat, TypeBool} {
+		t.Run(string(typ), func(t *testing.T) {
+			encoded := EncodeValue([]byte("ciphertext"), typ)
+
+			parsed, err := Parse(encoded)
+			if err != nil {
+				t.Fatalf("Parse(%q): %v", encoded, err)
+			}
+			if string(parsed.Ciphertext) != "ciphertext" {
+				t.Errorf("Ciphertext = %q, want %q", parsed.Ciphertext, "ciphertext")
+			}
+			if parsed.Type != typ {
+				t.Errorf("Type = %q, want %q", parsed.Type, typ)
+			}
+		})
+	}
+}
+
+// A whole-file tag has no type field and must keep parsing without one:
+// that form is already committed in every repository created before
+// per-value mode existed.
+func TestParseWholeFileTagHasNoType(t *testing.T) {
+	parsed, err := Parse(Encode([]byte("ciphertext")))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if parsed.Type != TypeNone {
+		t.Errorf("Type = %q, want TypeNone", parsed.Type)
+	}
+}
+
+// AC-3.8, extended to the type field: a tag naming a type this build can't
+// restore is refused rather than guessed at.
+func TestParseRejectsUnsupportedType(t *testing.T) {
+	if _, err := Parse("ENC[AES256_SIV,data:AAAA,type:date]"); !errors.Is(err, ErrUnsupportedType) {
+		t.Errorf("Parse() error = %v, want %v", err, ErrUnsupportedType)
+	}
+	if _, err := Parse("ENC[AES256_SIV,data:AAAA,flavour:str]"); !errors.Is(err, ErrMalformed) {
+		t.Errorf("Parse() error = %v, want %v", err, ErrMalformed)
+	}
+}

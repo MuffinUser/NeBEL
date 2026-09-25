@@ -7,30 +7,60 @@ import (
 	"strings"
 
 	"github.com/MarwinMoellers/strucrypt/internal/config"
+	"github.com/MarwinMoellers/strucrypt/internal/format"
 	"github.com/MarwinMoellers/strucrypt/internal/gitutil"
 )
 
 const gitattributesName = ".gitattributes"
 
-// runAdd implements `strucrypt add <glob>` (spec 08 AC-8.1). MVP scope:
-// whole-file rules only — no --field, so per-value rules can't be created
-// by this command (mode: value isn't implemented yet, see internal/config).
+const addUsage = `usage:
+  strucrypt add file <glob>            encrypt whole files matching <glob>
+  strucrypt add field <file> [path...] encrypt named values inside <file>`
+
+// runAdd dispatches the two kinds of rule (spec 08). They are separate
+// subcommands rather than one command with a flag because they produce
+// different rules, take different arguments, and are chosen for different
+// reasons: whole-file for blobs with no readable structure, per-value for
+// config you still want to diff.
 func runAdd(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("%s", addUsage)
+	}
+	switch args[0] {
+	case "file":
+		return runAddFile(args[1:])
+	case "field":
+		return runAddField(args[1:])
+	}
+	return fmt.Errorf("unknown subcommand %q\n%s", args[0], addUsage)
+}
+
+// openConfig loads the committed config, returning the repository root and
+// the config's path alongside it since every caller needs all three.
+func openConfig() (root, configPath string, cfg *config.Config, err error) {
+	root, err = gitutil.RepoRoot()
+	if err != nil {
+		return "", "", nil, err
+	}
+	configPath = filepath.Join(root, config.FileName)
+	if !config.Exists(configPath) {
+		return "", "", nil, fmt.Errorf("no %s found — run `strucrypt init` first", config.FileName)
+	}
+	cfg, err = config.Load(configPath)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return root, configPath, cfg, nil
+}
+
+// runAddFile implements `strucrypt add file <glob>` (AC-8.1).
+func runAddFile(args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("usage: strucrypt add <glob>")
+		return fmt.Errorf("usage: strucrypt add file <glob>")
 	}
 	glob := args[0]
 
-	root, err := gitutil.RepoRoot()
-	if err != nil {
-		return err
-	}
-	configPath := filepath.Join(root, config.FileName)
-	if !config.Exists(configPath) {
-		return fmt.Errorf("no %s found — run `strucrypt init` first", config.FileName)
-	}
-
-	cfg, err := config.Load(configPath)
+	root, configPath, cfg, err := openConfig()
 	if err != nil {
 		return err
 	}
@@ -55,6 +85,118 @@ func runAdd(args []string) error {
 	}
 
 	fmt.Printf("Added rule: %s (mode: file)\n", glob)
+	return nil
+}
+
+// runAddField implements `strucrypt add field <file> [path...]` (AC-8.2).
+//
+// The file argument doubles as the rule's pattern and as the document the
+// paths are checked against: a path that doesn't resolve is refused here,
+// rather than failing later on whoever first stages the file.
+//
+// With no paths given, the file's scalars are listed for interactive
+// selection, so nobody has to hand-write dot notation for a nested key.
+func runAddField(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: strucrypt add field <file> [path...]")
+	}
+	target, paths := args[0], args[1:]
+
+	root, configPath, cfg, err := openConfig()
+	if err != nil {
+		return err
+	}
+
+	// The rule pattern is stored as given, but the document is read from
+	// the working tree, so the argument has to name a real file.
+	source, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(target)))
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", target, err)
+	}
+	handler, err := format.For(target)
+	if err != nil {
+		return err
+	}
+
+	existing := existingFields(cfg, target)
+	if len(paths) == 0 {
+		if paths, err = pickFields(handler, source, target, existing); err != nil {
+			return err
+		}
+	}
+
+	added, err := validateFields(handler, source, paths, existing)
+	if err != nil {
+		return err
+	}
+	if len(added) == 0 {
+		fmt.Printf("No new fields to add for %s.\n", target)
+		return addGitattributesPattern(root, target)
+	}
+
+	if err := applyFieldRule(cfg, target, added); err != nil {
+		return err
+	}
+	if err := cfg.Save(configPath); err != nil {
+		return err
+	}
+	if err := addGitattributesPattern(root, target); err != nil {
+		return err
+	}
+
+	fmt.Printf("Added to rule %s (mode: value):\n", target)
+	for _, path := range added {
+		fmt.Printf("  %s\n", path)
+	}
+	return nil
+}
+
+// existingFields returns the paths already configured for pattern.
+func existingFields(cfg *config.Config, pattern string) map[string]bool {
+	fields := map[string]bool{}
+	for _, r := range cfg.Rules {
+		if r.Files == pattern {
+			for _, field := range r.Encrypt {
+				fields[field] = true
+			}
+		}
+	}
+	return fields
+}
+
+// validateFields checks each requested path against the document and drops
+// the ones already configured, so re-running the command is a no-op
+// (AC-8.5).
+func validateFields(handler format.Handler, source []byte, paths []string, existing map[string]bool) ([]string, error) {
+	var added []string
+	seen := map[string]bool{}
+	for _, path := range paths {
+		if _, err := handler.Locate(source, path); err != nil {
+			return nil, err
+		}
+		if existing[path] || seen[path] {
+			continue
+		}
+		seen[path] = true
+		added = append(added, path)
+	}
+	return added, nil
+}
+
+// applyFieldRule appends the paths to the pattern's rule, creating a
+// mode: value rule if there isn't one yet.
+func applyFieldRule(cfg *config.Config, pattern string, added []string) error {
+	for i, r := range cfg.Rules {
+		if r.Files != pattern {
+			continue
+		}
+		if r.Mode != config.ModeValue {
+			return fmt.Errorf("%q is already registered with mode: %s — remove that rule first, or pick a different pattern", pattern, r.Mode)
+		}
+		cfg.Rules[i].Encrypt = append(cfg.Rules[i].Encrypt, added...)
+		return nil
+	}
+	cfg.Rules = append(cfg.Rules, config.Rule{Files: pattern, Mode: config.ModeValue, Encrypt: added})
 	return nil
 }
 

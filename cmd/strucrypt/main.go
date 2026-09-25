@@ -44,7 +44,10 @@ func usage() {
                                  bootstrap or join a repo. The password is
                                  read from $STRUCRYPT_PASSWORD, from stdin
                                  with --password-stdin, or prompted for
-  strucrypt add <glob>           register a whole-file rule
+  strucrypt add file <glob>      encrypt whole files matching <glob>
+  strucrypt add field <file> [path...]
+                                 encrypt named values inside <file>;
+                                 with no paths, choose them interactively
   strucrypt clean <path>         (invoked by git) encrypt stdin to stdout
   strucrypt smudge <path>        (invoked by git) decrypt stdin to stdout
   strucrypt version              print the build version`)

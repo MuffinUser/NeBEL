@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"github.com/MarwinMoellers/strucrypt/internal/format"
 	"os"
 	"path/filepath"
 	"testing"
@@ -101,20 +102,76 @@ rules:
 	}
 }
 
-// mode: value is schema-valid but not implemented in this build; loading it
-// must fail clearly rather than silently doing nothing at filter time.
-func TestLoadRejectsModeValue(t *testing.T) {
+// A mode: value rule now loads, with its field list parsed.
+func TestLoadModeValue(t *testing.T) {
 	path := writeTempConfig(t, `
 salt: c3RydWNyeXB0LXRlc3Qtc2FsdC0xNg==
 canary: "ENC[AES256_SIV,data:aGVsbG8=]"
 rules:
   - files: "config/*.yaml"
     mode: value
-    encrypt: ["database.password"]
+    encrypt: ["database.password", "api.keys[0]"]
 `)
-	_, err := Load(path)
-	if !errors.Is(err, ErrModeUnsupported) {
-		t.Errorf("Load() error = %v, want %v", err, ErrModeUnsupported)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	rule, ok := cfg.MatchRule("config/staging.yaml")
+	if !ok {
+		t.Fatal("MatchRule did not match config/staging.yaml")
+	}
+	if rule.Mode != ModeValue {
+		t.Errorf("Mode = %q, want %q", rule.Mode, ModeValue)
+	}
+	if len(rule.Encrypt) != 2 {
+		t.Errorf("Encrypt = %v, want 2 fields", rule.Encrypt)
+	}
+}
+
+// A rule that protects nothing is a config mistake, not a valid document:
+// mode: value with no fields, or mode: file with fields it would ignore.
+func TestLoadRejectsMismatchedFieldLists(t *testing.T) {
+	tests := []struct {
+		name string
+		rule string
+		want error
+	}{
+		{"value without fields", `
+  - files: "config/*.yaml"
+    mode: value`, ErrNoFields},
+		{"file with fields", `
+  - files: "secrets/*.pem"
+    mode: file
+    encrypt: ["database.password"]`, ErrFieldsOnFileRule},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempConfig(t, `
+salt: c3RydWNyeXB0LXRlc3Qtc2FsdC0xNg==
+canary: "ENC[AES256_SIV,data:aGVsbG8=]"
+rules:`+tt.rule+`
+`)
+			if _, err := Load(path); !errors.Is(err, tt.want) {
+				t.Errorf("Load() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+// A malformed field path is caught when the repository is opened, not
+// silently on whichever machine first stages a matching file.
+func TestLoadRejectsBadFieldPath(t *testing.T) {
+	path := writeTempConfig(t, `
+salt: c3RydWNyeXB0LXRlc3Qtc2FsdC0xNg==
+canary: "ENC[AES256_SIV,data:aGVsbG8=]"
+rules:
+  - files: "config/*.yaml"
+    mode: value
+    encrypt: ["database..password"]
+`)
+	if _, err := Load(path); !errors.Is(err, format.ErrBadPath) {
+		t.Errorf("Load() error = %v, want %v", err, format.ErrBadPath)
 	}
 }
 

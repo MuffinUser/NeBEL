@@ -122,7 +122,7 @@ func TestEndToEndWholeFileHappyPath(t *testing.T) {
 
 	// Bootstrap: init with a fixed password (non-interactive, as CI would).
 	initWithPassword(t, repo, pathEnv, "test-password-123")
-	runIn(t, repo, pathEnv, "strucrypt", "add", "secrets/*.pem")
+	runIn(t, repo, pathEnv, "strucrypt", "add", "file", "secrets/*.pem")
 
 	secretsDir := filepath.Join(repo, "secrets")
 	if err := os.MkdirAll(secretsDir, 0o755); err != nil {
@@ -180,7 +180,7 @@ func TestCloneWithoutInitStaysEncrypted(t *testing.T) {
 	origin := newTestRepo(t, pathEnv)
 	runIn(t, origin, pathEnv, "git", "config", "receive.denyCurrentBranch", "updateInstead")
 	initWithPassword(t, origin, pathEnv, "test-password-123")
-	runIn(t, origin, pathEnv, "strucrypt", "add", "secrets/*.pem")
+	runIn(t, origin, pathEnv, "strucrypt", "add", "file", "secrets/*.pem")
 
 	secretsDir := filepath.Join(origin, "secrets")
 	if err := os.MkdirAll(secretsDir, 0o755); err != nil {

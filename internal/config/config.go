@@ -1,11 +1,5 @@
 // Package config parses and writes the committed .strucrypt.yaml rules
 // file: the salt, canary, and file-selection rules every clone shares.
-//
-// MVP scope: only mode: file rules. mode: value (per-value encryption) is
-// recognized by the schema, for forward compatibility with hand-written
-// configs, but rejected at load time — spec 05/06 don't implement it yet,
-// and running the filter against it would silently do nothing, which is
-// worse than refusing to start.
 package config
 
 import (
@@ -14,6 +8,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/MarwinMoellers/strucrypt/internal/format"
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/goccy/go-yaml"
 )
@@ -30,8 +25,8 @@ const (
 	// implements.
 	ModeFile Mode = "file"
 
-	// ModeValue encrypts selected values within a structured file.
-	// Recognized by the schema; rejected by Validate in this build.
+	// ModeValue encrypts selected values within a structured file,
+	// leaving the rest readable and diffable.
 	ModeValue Mode = "value"
 )
 
@@ -48,8 +43,7 @@ type Rule struct {
 	Mode Mode `yaml:"mode"`
 
 	// Encrypt lists the dot-notation paths to encrypt, for mode: value
-	// rules. Parsed for schema forward-compatibility; unused while mode:
-	// value is rejected by Validate.
+	// rules — "database.password", "api.keys[0]". Unused by mode: file.
 	Encrypt []string `yaml:"encrypt,omitempty"`
 }
 
@@ -73,9 +67,15 @@ var (
 	// "value".
 	ErrInvalidMode = errors.New("config: invalid mode")
 
-	// ErrModeUnsupported is returned when a rule's mode is recognized by
-	// the schema but not implemented by this build.
-	ErrModeUnsupported = errors.New("config: mode not supported in this build")
+	// ErrNoFields is returned when a mode: value rule lists no paths to
+	// encrypt. Such a rule silently protects nothing, which is worse than
+	// refusing to load it.
+	ErrNoFields = errors.New("config: mode: value rule encrypts no fields")
+
+	// ErrFieldsOnFileRule is returned when a mode: file rule carries an
+	// encrypt list, which it would ignore — a sign the author expected
+	// per-value behaviour and would not get it.
+	ErrFieldsOnFileRule = errors.New("config: mode: file rule must not list fields")
 )
 
 // SaltBytes decodes Salt from base64.
@@ -87,13 +87,28 @@ func (c *Config) SaltBytes() ([]byte, error) {
 	return b, nil
 }
 
-// Validate checks every rule's mode. Called automatically by Load.
+// Validate checks every rule's mode and field list. Called automatically
+// by Load.
+//
+// Field paths are parsed here rather than at clean time so a typo in a
+// committed config fails when the repository is opened, not silently on
+// the one machine that happens to stage that file.
 func (c *Config) Validate() error {
 	for _, r := range c.Rules {
 		switch r.Mode {
 		case ModeFile:
+			if len(r.Encrypt) > 0 {
+				return fmt.Errorf("%w: rule %q lists %d field(s); use mode: value to encrypt fields", ErrFieldsOnFileRule, r.Files, len(r.Encrypt))
+			}
 		case ModeValue:
-			return fmt.Errorf("%w: rule %q: mode: value (per-value encryption) is not implemented in this build", ErrModeUnsupported, r.Files)
+			if len(r.Encrypt) == 0 {
+				return fmt.Errorf("%w: rule %q", ErrNoFields, r.Files)
+			}
+			for _, field := range r.Encrypt {
+				if _, err := format.ParsePath(field); err != nil {
+					return fmt.Errorf("config: rule %q: %w", r.Files, err)
+				}
+			}
 		default:
 			return fmt.Errorf("%w: rule %q: mode must be \"file\" or \"value\", got %q", ErrInvalidMode, r.Files, r.Mode)
 		}

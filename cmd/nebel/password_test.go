@@ -5,6 +5,7 @@ package main
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -57,17 +58,24 @@ func TestResolvePasswordOptionalReturnsEmpty(t *testing.T) {
 	}
 }
 
+func intPtr(n int) *int { return &n }
+
 func TestParseInitArgs(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    []string
-		want    passwordInput
+		want    initArgs
 		wantErr bool
 	}{
-		{"no arguments", nil, passwordInput{}, false},
-		{"stdin flag", []string{"--password-stdin"}, passwordInput{fromStdin: true}, false},
-		{"unknown flag", []string{"--password", "hunter2"}, passwordInput{}, true},
-		{"positional password", []string{"hunter2"}, passwordInput{}, true},
+		{"no arguments", nil, initArgs{}, false},
+		{"stdin flag", []string{"--password-stdin"}, initArgs{password: passwordInput{fromStdin: true}}, false},
+		{"unknown flag", []string{"--password", "hunter2"}, initArgs{}, true},
+		{"positional password", []string{"hunter2"}, initArgs{}, true},
+		{"version flag", []string{"--version", "2"}, initArgs{version: intPtr(2)}, false},
+		{"version flag with stdin", []string{"--version", "3", "--password-stdin"}, initArgs{password: passwordInput{fromStdin: true}, version: intPtr(3)}, false},
+		{"version flag missing value", []string{"--version"}, initArgs{}, true},
+		{"version flag non-numeric", []string{"--version", "abc"}, initArgs{}, true},
+		{"version flag zero", []string{"--version", "0"}, initArgs{}, true},
 	}
 
 	for _, tt := range tests {
@@ -82,8 +90,18 @@ func TestParseInitArgs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseInitArgs(%q): %v", tt.args, err)
 			}
-			if got != tt.want {
-				t.Errorf("parseInitArgs(%q) = %+v, want %+v", tt.args, got, tt.want)
+			if got.password != tt.want.password {
+				t.Errorf("parseInitArgs(%q).password = %+v, want %+v", tt.args, got.password, tt.want.password)
+			}
+			gotVersion, wantVersion := "nil", "nil"
+			if got.version != nil {
+				gotVersion = strconv.Itoa(*got.version)
+			}
+			if tt.want.version != nil {
+				wantVersion = strconv.Itoa(*tt.want.version)
+			}
+			if gotVersion != wantVersion {
+				t.Errorf("parseInitArgs(%q).version = %s, want %s", tt.args, gotVersion, wantVersion)
 			}
 		})
 	}

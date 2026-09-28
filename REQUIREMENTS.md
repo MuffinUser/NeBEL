@@ -34,28 +34,34 @@ with transparent local decryption for developers.
 
 - **One key per revision, multiple possible keys per project.** Rotating
   (`nebel rotate`) mints a new key version — new salt, new
-  password-derived key, new canary — in the committed config. It does
-  **not** touch any already-encrypted content.
+  password-derived key, new canary — in the committed config, then
+  eagerly re-encrypts every already-encrypted value/file this clone can
+  currently decrypt onto it, so a single password decrypts everything the
+  repository currently tracks.
 - Every encrypted value/file tag (spec 03) records which key version
   produced it. `clean` always encrypts with the *current* version;
   `smudge` decrypts with whichever version a value's own tag names. Each
   machine keeps every version it has ever derived (`nebel init` /
   `nebel rotate`) in a small local keyring, not just one key.
-- **Convergence is lazy**: a value migrates to the current version only
-  the next time it's edited and staged — not via a repo-wide rewrite.
-  This is also what makes a branch encrypted under an older version safe
-  to merge later: only the fields still on that version need it, with a
-  clear "needs key version N" error if it's missing, and they self-heal
-  on their next edit.
-- **The cost this doesn't remove**: a version stays load-bearing until
-  nothing depends on it. `nebel status` reports which versions are still
-  in use so a team knows when a password is finally safe to discard —
-  discarding one too early makes whatever still depends on it permanently
-  unreadable.
+- **Convergence is eager where rotate can reach, lazy elsewhere**: rotate
+  drives the migration itself, immediately, for every field the running
+  clone can currently decrypt. A field it can't reach (this clone never
+  registered that version's key) is not silently left behind: rotate
+  refuses outright, naming the stuck field and the version it needs, so
+  the repo never ends up split across versions without the operator
+  knowing. Content rotate never touched at all in the first place — added
+  after the fact, say, or by a machine that hasn't rotated yet — still
+  migrates the ordinary way, lazily, the next time it's edited and
+  staged. This is also what makes a branch encrypted under an older
+  version safe to merge later: only the fields still on that version need
+  it, with a clear "needs key version N" error if it's missing, and they
+  self-heal on their next edit.
 - **Forward-only, distribution unchanged**: rotation only protects *new*
-  encryption going forward, and the new password is shared out-of-band
-  the same way as the original. A leaked password still requires
-  changing the underlying secrets, not just rotating the key.
+  encryption going forward — anyone who had the old password can still
+  decrypt this repository's history from before the rotation commit. The
+  new password is shared out-of-band the same way as the original. A
+  leaked password still requires changing the underlying secrets, not
+  just rotating the key.
 
 ## Git integration
 

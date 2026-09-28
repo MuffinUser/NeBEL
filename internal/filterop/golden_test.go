@@ -28,6 +28,20 @@ import (
 // Do not regenerate these fixtures to make a failing test pass. A failure
 // here means this build cannot read files an earlier build wrote, and the
 // answer is either to revert the format change or to ship a migration.
+//
+// Exception already taken: spec 11 (key rotation) made the tag's `key:`
+// field mandatory (spec 03 AC-3.6) — a deliberate breaking format change,
+// since every tag written before rotation existed had no `key:` field at
+// all and no version to fall back to. These fixtures were bumped forward
+// to the new format (`key_version: 1` added to .nebel.yaml, `key:1,`
+// spliced into each stored blob's tag) with the same salt/password, so the
+// underlying ciphertext bytes are untouched — only the tag wrapper changed.
+// There is no fully automatic migration for a real pre-rotation
+// repository: its canary is checked (and fails to parse) before any
+// command runs at all. See README.md's "Upgrading from a pre-rotation
+// repository" for the fix — two hand-edits to .nebel.yaml, then
+// `git add --renormalize` (which then works fine, since it re-cleans from
+// the working tree's already-decrypted plaintext, not the legacy blob).
 const goldenPassword = "correct horse battery staple"
 
 // goldenPlaintexts maps each fixture's repo-relative path — which is also
@@ -48,7 +62,7 @@ func goldenPlaintexts() map[string][]byte {
 
 // loadGoldenRepo loads the frozen config and re-derives its key from the
 // fixed password, exactly as `nebel init` does on a fresh clone.
-func loadGoldenRepo(t *testing.T) (*config.Config, []byte) {
+func loadGoldenRepo(t *testing.T) (*config.Config, Keyring) {
 	t.Helper()
 
 	cfg, err := config.Load(filepath.Join("testdata", "v1", config.FileName))
@@ -68,7 +82,7 @@ func loadGoldenRepo(t *testing.T) (*config.Config, []byte) {
 	if err := cfg.VerifyCanary(key); err != nil {
 		t.Fatalf("frozen canary no longer verifies under the derived key: %v", err)
 	}
-	return cfg, key
+	return cfg, Keyring{cfg.CurrentVersion(): key}
 }
 
 func readGoldenFile(t *testing.T, repoPath string) []byte {
@@ -84,11 +98,11 @@ func readGoldenFile(t *testing.T, repoPath string) []byte {
 // original plaintext: this is the checkout path a user hits on every clone
 // of a repository whose secrets predate the current build.
 func TestSmudgeGoldenFixture(t *testing.T) {
-	cfg, key := loadGoldenRepo(t)
+	cfg, keyring := loadGoldenRepo(t)
 
 	for repoPath, want := range goldenPlaintexts() {
 		t.Run(repoPath, func(t *testing.T) {
-			got, err := Smudge(cfg, key, repoPath, readGoldenFile(t, repoPath))
+			got, err := Smudge(cfg, keyring, repoPath, readGoldenFile(t, repoPath))
 			if err != nil {
 				t.Fatalf("committed secrets no longer decrypt: %v", err)
 			}
@@ -104,11 +118,11 @@ func TestSmudgeGoldenFixture(t *testing.T) {
 // unchanged secret with a newer build has to leave git's object store
 // untouched — otherwise every user's next commit rewrites every secret.
 func TestCleanReproducesGoldenFixture(t *testing.T) {
-	cfg, key := loadGoldenRepo(t)
+	cfg, keyring := loadGoldenRepo(t)
 
 	for repoPath, plaintext := range goldenPlaintexts() {
 		t.Run(repoPath, func(t *testing.T) {
-			got, err := Clean(cfg, key, repoPath, plaintext)
+			got, err := Clean(cfg, keyring, repoPath, plaintext)
 			if err != nil {
 				t.Fatalf("Clean: %v", err)
 			}
@@ -123,10 +137,10 @@ func TestCleanReproducesGoldenFixture(t *testing.T) {
 // is what stops a committed blob from being copy-pasted to another location,
 // and it is the part of the format most easily broken by accident.
 func TestGoldenFixtureStaysBoundToItsPath(t *testing.T) {
-	cfg, key := loadGoldenRepo(t)
+	cfg, keyring := loadGoldenRepo(t)
 
 	blob := readGoldenFile(t, "secrets/prod.pem")
-	plaintext, err := Smudge(cfg, key, "secrets/every-byte.pem", blob)
+	plaintext, err := Smudge(cfg, keyring, "secrets/every-byte.pem", blob)
 	if err == nil {
 		t.Fatalf("blob decrypted under another file's path, got %q", plaintext)
 	}

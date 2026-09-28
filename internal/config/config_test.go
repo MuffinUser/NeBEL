@@ -207,7 +207,7 @@ func TestCanaryRoundTrip(t *testing.T) {
 		wrongKey[i] = byte(255 - i)
 	}
 
-	canaryTag, err := NewCanary(key)
+	canaryTag, err := NewCanary(key, 1)
 	if err != nil {
 		t.Fatalf("NewCanary: %v", err)
 	}

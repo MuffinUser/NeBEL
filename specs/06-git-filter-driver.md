@@ -54,9 +54,10 @@ See REQUIREMENTS.md § Git integration, § Bootstrapping & no-key operation.
   never a guess.
 - **AC-6.12 Clean always targets the current version**: `clean` encrypts
   every value/file it touches using the config's current `key_version`,
-  regardless of what version that value previously carried. This is what
-  makes rotation converge lazily as files are naturally edited (spec 11)
-  — no repo-wide rewrite step exists or is needed.
+  regardless of what version that value previously carried. `nebel
+  rotate` (spec 11) relies on this to eagerly re-encrypt everything it
+  can onto the version it just minted; anything left over still converges
+  the same way, lazily, the next time it's naturally edited.
 - **AC-6.13 Smudge selects by tag version**: `smudge` decrypts each
   value/file using the keyring entry matching *that value's own*
   tag-declared version, not the config's current version — a file whose

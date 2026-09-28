@@ -52,12 +52,18 @@ type Rule struct {
 
 // Config is the parsed contents of .nebel.yaml.
 type Config struct {
-	// Salt is the Argon2id salt, base64-encoded. Not secret.
+	// KeyVersion is the current key version (spec 11): Salt and Canary
+	// below are this version's. clean always encrypts under this version;
+	// an older version an existing value still carries is looked up via
+	// its own tag (spec 03) instead.
+	KeyVersion int `yaml:"key_version"`
+
+	// Salt is the Argon2id salt for KeyVersion, base64-encoded. Not secret.
 	Salt string `yaml:"salt"`
 
-	// Canary is an ENC[...] tag (spec 03) over CanaryPlaintext, encrypted
-	// with AAD = CanaryAAD. It lets Init verify a candidate password is
-	// correct before trusting it.
+	// Canary is an ENC[...] tag (spec 03) over CanaryPlaintext for
+	// KeyVersion, encrypted with AAD = CanaryAAD. It lets Init verify a
+	// candidate password is correct before trusting it.
 	Canary string `yaml:"canary"`
 
 	// Rules are matched against a file's path in order; the first match
@@ -88,6 +94,16 @@ func (c *Config) SaltBytes() ([]byte, error) {
 		return nil, fmt.Errorf("config: decoding salt: %w", err)
 	}
 	return b, nil
+}
+
+// CurrentVersion returns c.KeyVersion, defaulting to 1 when it is unset —
+// Go's zero value for an absent yaml field is 0, which is otherwise never a
+// valid version (AC-4.10: bootstrap always starts at 1).
+func (c *Config) CurrentVersion() int {
+	if c.KeyVersion == 0 {
+		return 1
+	}
+	return c.KeyVersion
 }
 
 // Validate checks every rule's mode and field list. Called automatically

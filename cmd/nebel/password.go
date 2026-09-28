@@ -32,6 +32,17 @@ var ErrPasswordArgument = errors.New(`passwords are no longer accepted as comman
     get-secret | nebel init --password-stdin
     nebel init                 (prompts)`)
 
+// ErrRotatePasswordArgument is ErrPasswordArgument's counterpart for
+// `nebel rotate` (spec 11 AC-11.3): rotate never prompts interactively —
+// with no password from any other source it generates one instead — so
+// the suggested alternatives differ from init's.
+var ErrRotatePasswordArgument = errors.New(`passwords are no longer accepted as command-line arguments:
+  the argument is visible in the process list to every other user on this
+  machine, and is recorded in shell history and CI logs. Use one of:
+    NEBEL_PASSWORD="$SECRET" nebel rotate
+    get-secret | nebel rotate --password-stdin
+    nebel rotate               (generates one)`)
+
 // passwordInput is the set of password sources named on the command line.
 type passwordInput struct {
 	// fromStdin is --password-stdin: read the password from stdin, so it

@@ -34,7 +34,7 @@ func valueConfig(fields ...string) *config.Config {
 // AC-6.2: clean on a mode: value rule encrypts only the configured
 // scalars, leaving the rest of the document readable.
 func TestCleanValuesEncryptsOnlyConfiguredFields(t *testing.T) {
-	got, err := Clean(valueConfig(), testKey, "config/staging.yaml", []byte(valueDoc))
+	got, err := Clean(valueConfig(), testKeyring, "config/staging.yaml", []byte(valueDoc))
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
@@ -58,11 +58,11 @@ func TestCleanValuesEncryptsOnlyConfiguredFields(t *testing.T) {
 func TestValueRoundTripLeavesUntouchedBytesExact(t *testing.T) {
 	cfg := valueConfig("database.password", "database.port")
 
-	cleaned, err := Clean(cfg, testKey, "config/staging.yaml", []byte(valueDoc))
+	cleaned, err := Clean(cfg, testKeyring, "config/staging.yaml", []byte(valueDoc))
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
-	smudged, err := Smudge(cfg, testKey, "config/staging.yaml", cleaned)
+	smudged, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned)
 	if err != nil {
 		t.Fatalf("Smudge: %v", err)
 	}
@@ -79,11 +79,11 @@ func TestValueRoundTripLeavesUntouchedBytesExact(t *testing.T) {
 func TestValueRoundTripNormalizesPlainStringQuoting(t *testing.T) {
 	cfg := valueConfig("api.token")
 
-	cleaned, err := Clean(cfg, testKey, "config/staging.yaml", []byte(valueDoc))
+	cleaned, err := Clean(cfg, testKeyring, "config/staging.yaml", []byte(valueDoc))
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
-	smudged, err := Smudge(cfg, testKey, "config/staging.yaml", cleaned)
+	smudged, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned)
 	if err != nil {
 		t.Fatalf("Smudge: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestValueRoundTripNormalizesPlainStringQuoting(t *testing.T) {
 
 	// The drift must not compound: cleaning the re-quoted document has to
 	// reproduce the same blob, or every checkout would dirty the file.
-	recleaned, err := Clean(cfg, testKey, "config/staging.yaml", smudged)
+	recleaned, err := Clean(cfg, testKeyring, "config/staging.yaml", smudged)
 	if err != nil {
 		t.Fatalf("re-clean: %v", err)
 	}
@@ -107,14 +107,14 @@ func TestValueRoundTripNormalizesPlainStringQuoting(t *testing.T) {
 func TestValueRoundTripPreservesType(t *testing.T) {
 	cfg := valueConfig("database.port")
 
-	cleaned, err := Clean(cfg, testKey, "config/staging.yaml", []byte(valueDoc))
+	cleaned, err := Clean(cfg, testKeyring, "config/staging.yaml", []byte(valueDoc))
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
 	if !strings.Contains(string(cleaned), "type:int") {
 		t.Errorf("the integer's type was not recorded in the tag:\n%s", cleaned)
 	}
-	smudged, err := Smudge(cfg, testKey, "config/staging.yaml", cleaned)
+	smudged, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned)
 	if err != nil {
 		t.Fatalf("Smudge: %v", err)
 	}
@@ -126,11 +126,11 @@ func TestValueRoundTripPreservesType(t *testing.T) {
 // AC-6.3: clean is deterministic, so re-staging an unchanged file produces
 // no diff.
 func TestCleanValuesIsDeterministic(t *testing.T) {
-	first, err := Clean(valueConfig(), testKey, "config/staging.yaml", []byte(valueDoc))
+	first, err := Clean(valueConfig(), testKeyring, "config/staging.yaml", []byte(valueDoc))
 	if err != nil {
 		t.Fatalf("first clean: %v", err)
 	}
-	second, err := Clean(valueConfig(), testKey, "config/staging.yaml", []byte(valueDoc))
+	second, err := Clean(valueConfig(), testKeyring, "config/staging.yaml", []byte(valueDoc))
 	if err != nil {
 		t.Fatalf("second clean: %v", err)
 	}
@@ -142,11 +142,11 @@ func TestCleanValuesIsDeterministic(t *testing.T) {
 // AC-6.4: a field that is already tagged is left exactly as it is, rather
 // than encrypted a second time.
 func TestCleanValuesSkipsAlreadyEncrypted(t *testing.T) {
-	once, err := Clean(valueConfig(), testKey, "config/staging.yaml", []byte(valueDoc))
+	once, err := Clean(valueConfig(), testKeyring, "config/staging.yaml", []byte(valueDoc))
 	if err != nil {
 		t.Fatalf("first clean: %v", err)
 	}
-	twice, err := Clean(valueConfig(), testKey, "config/staging.yaml", once)
+	twice, err := Clean(valueConfig(), testKeyring, "config/staging.yaml", once)
 	if err != nil {
 		t.Fatalf("second clean: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestCleanValuesSkipsAlreadyEncrypted(t *testing.T) {
 // AC-6.7: a file whose fields are still plaintext (staged before the
 // filter was registered) passes through smudge untouched.
 func TestSmudgeValuesTolerantOfPlaintext(t *testing.T) {
-	got, err := Smudge(valueConfig(), testKey, "config/staging.yaml", []byte(valueDoc))
+	got, err := Smudge(valueConfig(), testKeyring, "config/staging.yaml", []byte(valueDoc))
 	if err != nil {
 		t.Fatalf("Smudge: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestSmudgeValuesTolerantOfPlaintext(t *testing.T) {
 // AC-5.2: a configured field the file doesn't contain is an error. Silently
 // skipping it would report success while committing that secret in clear.
 func TestCleanValuesMissingFieldFails(t *testing.T) {
-	_, err := Clean(valueConfig("database.nope"), testKey, "config/staging.yaml", []byte(valueDoc))
+	_, err := Clean(valueConfig("database.nope"), testKeyring, "config/staging.yaml", []byte(valueDoc))
 	if err == nil {
 		t.Fatal("Clean with a missing field: want an error, got nil")
 	}
@@ -182,7 +182,7 @@ func TestCleanValuesMissingFieldFails(t *testing.T) {
 // AC-6.9: a tampered tag is reported, never smudged into plausible-looking
 // plaintext.
 func TestSmudgeValuesSurfacesTampering(t *testing.T) {
-	cleaned, err := Clean(valueConfig(), testKey, "config/staging.yaml", []byte(valueDoc))
+	cleaned, err := Clean(valueConfig(), testKeyring, "config/staging.yaml", []byte(valueDoc))
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestSmudgeValuesSurfacesTampering(t *testing.T) {
 	tampered := bytes.Clone(cleaned)
 	tampered[idx] ^= 1
 
-	if _, err := Smudge(valueConfig(), testKey, "config/staging.yaml", tampered); err == nil {
+	if _, err := Smudge(valueConfig(), testKeyring, "config/staging.yaml", tampered); err == nil {
 		t.Error("Smudge on a tampered tag: want an error, got nil")
 	}
 }
@@ -199,7 +199,7 @@ func TestSmudgeValuesSurfacesTampering(t *testing.T) {
 // A value sealed for one field must not decrypt in another: the AAD binds
 // each ciphertext to its own location, so a tag cannot be copy-pasted.
 func TestValueTagIsBoundToItsField(t *testing.T) {
-	cleaned, err := Clean(valueConfig("database.password"), testKey, "config/staging.yaml", []byte(valueDoc))
+	cleaned, err := Clean(valueConfig("database.password"), testKeyring, "config/staging.yaml", []byte(valueDoc))
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestValueTagIsBoundToItsField(t *testing.T) {
 	tagText := string(cleaned[bytes.Index(cleaned, []byte(`"ENC[`)) : bytes.Index(cleaned, []byte("]\""))+2])
 	moved := strings.Replace(valueDoc, "token: alpha", "token: "+tagText, 1)
 
-	if _, err := Smudge(valueConfig("api.token"), testKey, "config/staging.yaml", []byte(moved)); err == nil {
+	if _, err := Smudge(valueConfig("api.token"), testKeyring, "config/staging.yaml", []byte(moved)); err == nil {
 		t.Error("a tag moved to another field still decrypted")
 	}
 }
@@ -219,7 +219,7 @@ func TestValuesUnsupportedFormatFails(t *testing.T) {
 	cfg := &config.Config{Rules: []config.Rule{
 		{Files: "config/*.toml", Mode: config.ModeValue, Encrypt: []string{"database.password"}},
 	}}
-	if _, err := Clean(cfg, testKey, "config/staging.toml", []byte("password = 's3cr3t'")); err == nil {
+	if _, err := Clean(cfg, testKeyring, "config/staging.toml", []byte("password = 's3cr3t'")); err == nil {
 		t.Error("Clean on an unsupported format: want an error, got nil")
 	}
 }
@@ -227,8 +227,8 @@ func TestValuesUnsupportedFormatFails(t *testing.T) {
 // A whole-file blob pasted into a value slot has no type to restore;
 // guessing one would silently change the document's shape.
 func TestSmudgeValuesRejectsUntypedTag(t *testing.T) {
-	doc := strings.Replace(valueDoc, `password: "s3cr3t"`, `password: "`+tag.Encode([]byte("whatever"))+`"`, 1)
-	if _, err := Smudge(valueConfig(), testKey, "config/staging.yaml", []byte(doc)); err == nil {
+	doc := strings.Replace(valueDoc, `password: "s3cr3t"`, `password: "`+tag.Encode([]byte("whatever"), 1)+`"`, 1)
+	if _, err := Smudge(valueConfig(), testKeyring, "config/staging.yaml", []byte(doc)); err == nil {
 		t.Error("Smudge on an untyped tag: want an error, got nil")
 	}
 }

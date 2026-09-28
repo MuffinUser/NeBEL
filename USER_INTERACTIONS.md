@@ -186,22 +186,31 @@ Generated new password: correct-horse-battery-staple-2b7e
 ⚠ This password will not be shown again — store it in your password
   manager now and share it with your team out-of-band.
 
-Rotated to key version 3. No existing files were changed — each field
-migrates to the new version the next time it's edited and staged.
+Rotated to key version 3 and re-encrypted 4 files under it.
 
 Staged:
   .nebel.yaml
+  config/staging.yaml
+  secrets/prod.pem
+  secrets/staging.pem
+  secrets/backup.pem
 
 Commit when ready:
   git commit -m "rotate encryption key"
 
-Other clones/CI need `nebel init` again with the new password before they
-can write under version 3 — reading existing content is unaffected.
+Once that commit exists, every field on this branch is tagged version
+3 — a plain `git pull` on another clone will fail (it needs the new key
+to read the changed files) until that clone runs:
 
-Don't discard the old password until `nebel status` shows no fields left
-on the version it protects. And as always: rotation is forward-only —
-anyone who had the old password can still decrypt everything already
-encrypted with it. If it leaked, change the underlying secrets too.
+  git fetch
+  git show @{u}:.nebel.yaml > .nebel.yaml   # not filter-managed, always safe
+  nebel init                                # with the new password
+  git add -u                                 # re-stage so nothing looks locally modified
+  git pull
+
+Rotation is forward-only: anyone who had the old password can still
+decrypt this repository's history from before the rotation commit. If it
+leaked, change the underlying secrets too, not just the password.
 ```
 
 - Requires the local keyring to already hold a key for the current
@@ -213,14 +222,25 @@ encrypted with it. If it leaked, change the underlying secrets too.
 - Adds the new version's key to the local keyring (existing versions stay
   cached too), so the machine that rotated keeps reading everything it
   could read before.
-- Doesn't touch any already-encrypted file — only `.nebel.yaml` changes,
-  and only it gets staged. Existing content keeps decrypting under
-  whatever version it already has; it converges to the new version only
-  when it's next edited (or force-migrated with `git add --renormalize`).
-- Other clones/CI keep reading old content fine with their current key;
-  they only hit an error (naming `nebel init`) if they try to *write*
-  under a version they don't have, or read a value tagged with a version
-  they've never fetched.
+- Eagerly re-encrypts every managed file/field this clone can currently
+  decrypt onto the new version — equivalent to running `git add
+  --renormalize` over the whole repo itself — and stages `.nebel.yaml`
+  plus everything it actually re-encrypted. Nothing is left dangling for
+  a manual follow-up.
+- Refuses up front, before changing anything, if this clone can't
+  currently decrypt everything it manages (some field still shows up as
+  `ENC[...]` in the working tree): rotating anyway would silently strand
+  that field on its existing version forever. The error names the stuck
+  path, field, and version, and points at `nebel init --version N`.
+- Other clones/CI keep reading old content fine with their *current* key
+  right up until they pull the rotation commit — after that, since
+  rotation just re-encrypted everything on this branch, they need the new
+  password to read or write any of it. Because the commit changes the
+  ciphertext of already-tracked files (not just `.nebel.yaml`), their
+  plain `git pull` fails outright rather than degrading gracefully — see
+  the recipe above, and the README's "Pulling after a teammate rotates".
+  Merging in a different branch that was never rotated brings its
+  old-version content back, same as any other merge.
 
 ## Command surface summary
 

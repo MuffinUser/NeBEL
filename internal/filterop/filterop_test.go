@@ -12,6 +12,7 @@ import (
 )
 
 var testKey = bytes.Repeat([]byte{0x42}, 64)
+var testKeyring = Keyring{1: testKey}
 
 func testConfig() *config.Config {
 	return &config.Config{Rules: []config.Rule{
@@ -21,7 +22,7 @@ func testConfig() *config.Config {
 
 // AC-6.1: clean on a mode: file rule wraps the whole input in one ENC[...] tag.
 func TestCleanWholeFile(t *testing.T) {
-	got, err := Clean(testConfig(), testKey, "secrets/prod.pem", []byte("-----BEGIN KEY-----"))
+	got, err := Clean(testConfig(), testKeyring, "secrets/prod.pem", []byte("-----BEGIN KEY-----"))
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
@@ -34,11 +35,11 @@ func TestCleanWholeFile(t *testing.T) {
 // produces byte-identical output both times.
 func TestCleanIsIdempotent(t *testing.T) {
 	input := []byte("-----BEGIN KEY-----")
-	first, err := Clean(testConfig(), testKey, "secrets/prod.pem", input)
+	first, err := Clean(testConfig(), testKeyring, "secrets/prod.pem", input)
 	if err != nil {
 		t.Fatalf("first clean: %v", err)
 	}
-	second, err := Clean(testConfig(), testKey, "secrets/prod.pem", input)
+	second, err := Clean(testConfig(), testKeyring, "secrets/prod.pem", input)
 	if err != nil {
 		t.Fatalf("second clean: %v", err)
 	}
@@ -50,8 +51,8 @@ func TestCleanIsIdempotent(t *testing.T) {
 // AC-6.4: clean run on input that is already a well-formed ENC[...] tag
 // leaves it unchanged rather than double-encrypting.
 func TestCleanSkipsAlreadyEncrypted(t *testing.T) {
-	already := tag.Encode([]byte("some-ciphertext"))
-	got, err := Clean(testConfig(), testKey, "secrets/prod.pem", []byte(already))
+	already := tag.Encode([]byte("some-ciphertext"), 1)
+	got, err := Clean(testConfig(), testKeyring, "secrets/prod.pem", []byte(already))
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
@@ -68,11 +69,11 @@ func TestRoundTrip(t *testing.T) {
 		bytes.Repeat([]byte{0xAB, 0xCD}, 1000),
 	}
 	for _, input := range inputs {
-		cleaned, err := Clean(testConfig(), testKey, "secrets/prod.pem", input)
+		cleaned, err := Clean(testConfig(), testKeyring, "secrets/prod.pem", input)
 		if err != nil {
 			t.Fatalf("Clean: %v", err)
 		}
-		smudged, err := Smudge(testConfig(), testKey, "secrets/prod.pem", cleaned)
+		smudged, err := Smudge(testConfig(), testKeyring, "secrets/prod.pem", cleaned)
 		if err != nil {
 			t.Fatalf("Smudge: %v", err)
 		}
@@ -85,7 +86,7 @@ func TestRoundTrip(t *testing.T) {
 // A file that matches no rule passes through unchanged on both operations.
 func TestUnmatchedFilePassesThrough(t *testing.T) {
 	input := []byte("plain content")
-	cleaned, err := Clean(testConfig(), testKey, "README.md", input)
+	cleaned, err := Clean(testConfig(), testKeyring, "README.md", input)
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
@@ -93,7 +94,7 @@ func TestUnmatchedFilePassesThrough(t *testing.T) {
 		t.Errorf("Clean() on an unmatched file changed the content: %q", cleaned)
 	}
 
-	smudged, err := Smudge(testConfig(), testKey, "README.md", input)
+	smudged, err := Smudge(testConfig(), testKeyring, "README.md", input)
 	if err != nil {
 		t.Fatalf("Smudge: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestUnmatchedFilePassesThrough(t *testing.T) {
 // file not yet migrated through clean) passes it through unchanged.
 func TestSmudgeTolerantOfPlaintext(t *testing.T) {
 	input := []byte("still plaintext, filter never registered when this was staged")
-	got, err := Smudge(testConfig(), testKey, "secrets/prod.pem", input)
+	got, err := Smudge(testConfig(), testKeyring, "secrets/prod.pem", input)
 	if err != nil {
 		t.Fatalf("Smudge: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestSmudgeTolerantOfPlaintext(t *testing.T) {
 // AC-6.9: smudge on a well-formed but tampered ENC[...] tag fails with a
 // clear error rather than emitting corrupted plaintext.
 func TestSmudgeSurfacesTampering(t *testing.T) {
-	cleaned, err := Clean(testConfig(), testKey, "secrets/prod.pem", []byte("-----BEGIN KEY-----"))
+	cleaned, err := Clean(testConfig(), testKeyring, "secrets/prod.pem", []byte("-----BEGIN KEY-----"))
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
@@ -127,7 +128,7 @@ func TestSmudgeSurfacesTampering(t *testing.T) {
 	flipIdx := len("ENC[AES256_SIV,data:") + 2
 	tampered[flipIdx] ^= 1
 
-	plaintext, err := Smudge(testConfig(), testKey, "secrets/prod.pem", tampered)
+	plaintext, err := Smudge(testConfig(), testKeyring, "secrets/prod.pem", tampered)
 	if err == nil {
 		t.Fatalf("Smudge() on tampered ciphertext: want an error, got plaintext %q", plaintext)
 	}
@@ -139,12 +140,12 @@ func TestSmudgeSurfacesTampering(t *testing.T) {
 // Decrypting a matched, tagged value under the wrong key surfaces an error
 // instead of silently smudging garbage into the working tree.
 func TestSmudgeWrongKey(t *testing.T) {
-	cleaned, err := Clean(testConfig(), testKey, "secrets/prod.pem", []byte("-----BEGIN KEY-----"))
+	cleaned, err := Clean(testConfig(), testKeyring, "secrets/prod.pem", []byte("-----BEGIN KEY-----"))
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
 	wrongKey := bytes.Repeat([]byte{0x99}, 64)
-	if _, err := Smudge(testConfig(), wrongKey, "secrets/prod.pem", cleaned); err == nil {
+	if _, err := Smudge(testConfig(), Keyring{1: wrongKey}, "secrets/prod.pem", cleaned); err == nil {
 		t.Error("Smudge() with the wrong key: want an error, got nil")
 	}
 }

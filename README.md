@@ -8,9 +8,28 @@ checkout, via git's clean/smudge filter driver — day to day you just use git.
 This tool is derived from Tools like [git-crypt](https://github.com/agwa/git-crypt) and [transcrypt](https://github.com/elasticdog/transcrypt). 
 The Concept for inplace encryption is derived from [SOPS](https://github.com/getsops/sops).
 
-### Advantages
-This Tool is written in go. Making it easy to run on all Platforms(MacOS, Windows, Linux). This is where git-crypt and transcrypt struggle.
-The Transparent inplace Encryption enables useful Merges within a File. Beacaus git-crypt and transcrypt only encrypt the whole file. 
+### Name
+`nebel` is German for "fog" — a fitting image for a tool whose whole job is to
+make secrets unreadable. It also doubles as a backronym: **N**och **E**ine
+git-**B**lob-**E**ntschlüsselungs-**L**ösung, German for "yet another
+git-blob decryption solution" — a self-deprecating nod to the fact that
+git-crypt, transcrypt, and SOPS already exist, in the same spirit as other
+recursive/joke project acronyms (GNU, YAML, ...).
+
+### Advantages over git-crypt and transcrypt
+- **Cross-platform.** Written in Go and shipped as a single static binary, it
+  runs the same way on macOS, Windows, and Linux. git-crypt needs a C++
+  toolchain and GPG; transcrypt is a bash script — both struggle on Windows.
+- **Field-level, not just whole-file, encryption.** `nebel add field`
+  encrypts individual values inside a file and leaves the rest as plaintext.
+  git-crypt and transcrypt only ever encrypt an entire file, which makes
+  diffs opaque and merges inside that file effectively impossible; nebel's
+  in-place encryption keeps most of the file mergeable as normal.
+- **Versioned key rotation.** `nebel rotate` mints a new key version and
+  re-encrypts everything under it, while clones that haven't run `nebel
+  init` with the new password yet keep working — `git pull` still succeeds,
+  it just leaves the rotated files as ciphertext with a warning instead of
+  failing outright.
 
 ### Things to Concider
 At the Moment only Symetric-Encryption is provided. You have to Roate Keys on your own.

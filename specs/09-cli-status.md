@@ -24,3 +24,14 @@ Read-only inspection and CI gate. See USER_INTERACTIONS.md § 3.
   `encrypt` is reported separately (e.g. "not tracked") rather than being
   conflated with `PLAINTEXT`, so users can distinguish "forgot to encrypt
   this" from "this was never supposed to be encrypted."
+- **AC-9.9**: every encrypted field/file is reported with its key version
+  (from its tag), alongside its `encrypted` state.
+- **AC-9.10**: `status` summarizes, per key version found anywhere in the
+  tracked tree, how many fields/files still depend on it — so a team can
+  tell when a version has zero dependents left and its password is safe
+  to discard (spec 11 AC-11.10 for how to force the last stragglers off).
+- **AC-9.11**: a field/file whose declared version isn't in the local
+  keyring is reported distinctly (e.g. "needs key version N — not
+  registered locally"), not conflated with `PLAINTEXT` or a generic
+  error, and counts toward the non-zero exit code (extends AC-9.5) since
+  it means that content can't currently be verified on this machine.

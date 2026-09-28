@@ -110,6 +110,7 @@ git check-attr filter -- <path>   # should report "filter: nebel"
 | `nebel init [--password-stdin]` | Bootstrap a repo, or join one with the shared password |
 | `nebel add file <glob>` | Encrypt whole files matching a glob |
 | `nebel add field <file> [path...]` | Encrypt named values inside a file; with no paths, pick them interactively |
+| `nebel rotate [--password-stdin]` | Mint a new key version with a new password; existing content migrates lazily as it's next edited |
 | `nebel version` | Print the build version |
 
 `nebel clean` and `nebel smudge` exist for git to call; you never run

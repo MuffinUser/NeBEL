@@ -2,8 +2,8 @@
 
 Design principle: **minimal surface**. Day-to-day use should require zero
 commands — `git add`/`git commit`/`git checkout` just work via the filter
-driver. Only three explicit commands are needed: bootstrap/join a repo,
-register what to encrypt, and check status.
+driver. Only four explicit commands are needed: bootstrap/join a repo,
+register what to encrypt, check status, and rotate the shared key.
 
 ## 1. `nebel init [password]`
 
@@ -174,6 +174,54 @@ config/new-service.yaml     (mode: value)
   as a CI check to catch the "filter wasn't registered, plaintext got
   staged" failure mode called out earlier.
 
+## 4. `nebel rotate`
+
+Replace the shared password. Anyone whose local key currently verifies
+against the repo's canary can run this — not only whoever ran `init`
+first.
+
+```
+$ nebel rotate
+Generated new password: correct-horse-battery-staple-2b7e
+⚠ This password will not be shown again — store it in your password
+  manager now and share it with your team out-of-band.
+
+Rotated to key version 3. No existing files were changed — each field
+migrates to the new version the next time it's edited and staged.
+
+Staged:
+  .nebel.yaml
+
+Commit when ready:
+  git commit -m "rotate encryption key"
+
+Other clones/CI need `nebel init` again with the new password before they
+can write under version 3 — reading existing content is unaffected.
+
+Don't discard the old password until `nebel status` shows no fields left
+on the version it protects. And as always: rotation is forward-only —
+anyone who had the old password can still decrypt everything already
+encrypted with it. If it leaked, change the underlying secrets too.
+```
+
+- Requires the local keyring to already hold a key for the current
+  version that verifies against the current canary.
+- The new password follows the same input precedence as `init`:
+  `--password-stdin`, then `$NEBEL_PASSWORD`, else generated and printed
+  once. A positional password argument is refused, for the same reason as
+  `init` (see § Password input above).
+- Adds the new version's key to the local keyring (existing versions stay
+  cached too), so the machine that rotated keeps reading everything it
+  could read before.
+- Doesn't touch any already-encrypted file — only `.nebel.yaml` changes,
+  and only it gets staged. Existing content keeps decrypting under
+  whatever version it already has; it converges to the new version only
+  when it's next edited (or force-migrated with `git add --renormalize`).
+- Other clones/CI keep reading old content fine with their current key;
+  they only hit an error (naming `nebel init`) if they try to *write*
+  under a version they don't have, or read a value tagged with a version
+  they've never fetched.
+
 ## Command surface summary
 
 | Command | Who runs it | When |
@@ -181,6 +229,7 @@ config/new-service.yaml     (mode: value)
 | `nebel init [password]` | Repo owner (bootstrap) / every other clone / CI | Once per person/machine, and once per repo |
 | `nebel add <glob> [--field <path>]` | Any dev | When a new secret file or field is introduced |
 | `nebel status` | Any dev / CI | Ad hoc debugging, or as a CI gate |
+| `nebel rotate` | Any dev with a currently valid key | When the shared password needs to change (leak, offboarding, routine hygiene) |
 
 Everything else (encrypt on stage, decrypt on checkout) happens
 transparently through the git filter driver — no dedicated

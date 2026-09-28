@@ -24,6 +24,8 @@ func main() {
 		err = runInit(os.Args[2:])
 	case "add":
 		err = runAdd(os.Args[2:])
+	case "rotate":
+		err = runRotate(os.Args[2:])
 	case "clean":
 		err = runClean(os.Args[2:])
 	case "smudge":
@@ -51,10 +53,16 @@ func usage() {
                                  bootstrap or join a repo. The password is
                                  read from $NEBEL_PASSWORD, from stdin
                                  with --password-stdin, or prompted for
+  nebel init --version N [--password-stdin]
+                                 fetch and register a specific (possibly
+                                 non-current) key version's key locally
   nebel add file <glob>      encrypt whole files matching <glob>
   nebel add field <file> [path...]
                                  encrypt named values inside <file>;
                                  with no paths, choose them interactively
+  nebel rotate [--password-stdin]
+                                 mint a new, current key version; does not
+                                 touch already-encrypted content
   nebel clean <path>         (invoked by git) encrypt stdin to stdout
   nebel smudge <path>        (invoked by git) decrypt stdin to stdout
   nebel version              print the build version`)

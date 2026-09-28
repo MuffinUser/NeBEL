@@ -1,5 +1,6 @@
+key_version: 1
 salt: 4AXgES2+GJO6aJeZIG3vag==
-canary: ENC[AES256_SIV,data:lSncBJpxOJx2AmcAWkMxDh5/CzrBzeQv]
+canary: ENC[AES256_SIV,key:1,data:lSncBJpxOJx2AmcAWkMxDh5/CzrBzeQv]
 rules:
 - files: secrets/*.pem
   mode: file

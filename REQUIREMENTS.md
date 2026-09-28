@@ -19,21 +19,50 @@ with transparent local decryption for developers.
 
 ## Key management
 
-- Single shared **symmetric key** per project (no per-user asymmetric
-  keypairs for v1).
-- Key distributed **out-of-band manually** (password manager, Signal, etc.)
-  — the tool does not handle key distribution.
-- Target scale: small team, 2–10 people/machines.
-- **Key derivation**: the shared secret is a human password, not raw key
-  bytes. Derive actual key material as:
-  1. **Argon2id** (memory-hard KDF) over the password + a stored salt →
-     master secret. Argon2id chosen over PBKDF2/scrypt for stronger
-     resistance to offline brute-force/GPU attacks.
-  2. **HKDF** over the master secret → splits into the subkeys required by
-     AES-256-SIV (see Encryption).
-  - The Argon2id salt is **not secret** — it's checked into the repo
-    (alongside the encryption rules config) so every clone derives
-    identical key material from the same password.
+- Symmetric key, shared out-of-band (password manager, Signal, etc.) — no
+  per-user asymmetric keypairs. Target scale: small team, 2–10
+  people/machines.
+- **Key derivation**: a human password + a stored (non-secret) salt →
+  **Argon2id** → **HKDF** → the AES-256-SIV key material (see
+  Encryption). The salt is checked into the repo so every clone derives
+  identical key material from the same password.
+- At any commit there is exactly one **current** key, identified by a
+  `key_version` integer — see Key rotation for why a project can have
+  more than one version in play across its history.
+
+## Key rotation
+
+- **One key per revision, multiple possible keys per project.** Rotating
+  (`nebel rotate`) mints a new key version — new salt, new
+  password-derived key, new canary — in the committed config, then
+  eagerly re-encrypts every already-encrypted value/file this clone can
+  currently decrypt onto it, so a single password decrypts everything the
+  repository currently tracks.
+- Every encrypted value/file tag (spec 03) records which key version
+  produced it. `clean` always encrypts with the *current* version;
+  `smudge` decrypts with whichever version a value's own tag names. Each
+  machine keeps every version it has ever derived (`nebel init` /
+  `nebel rotate`) in a small local keyring, not just one key.
+- **Convergence is eager where rotate can reach, lazy elsewhere**: rotate
+  drives the migration itself, immediately, for every field the running
+  clone can currently decrypt. A field it can't reach (this clone never
+  registered that version's key) is not silently left behind: rotate
+  refuses outright, naming the stuck field and the version it needs, so
+  the repo never ends up split across versions without the operator
+  knowing. Content rotate never touched at all in the first place — added
+  after the fact, say, or by a machine that hasn't rotated yet — still
+  migrates the ordinary way, lazily, the next time it's edited and
+  staged. This is also what makes a branch encrypted under an older
+  version safe to merge later: only the fields still on that version need
+  it, and a missing one is left as ciphertext with a warning naming which
+  version it needs, rather than blocking the merge — they self-heal on
+  their next edit, or once the operator registers that version's key.
+- **Forward-only, distribution unchanged**: rotation only protects *new*
+  encryption going forward — anyone who had the old password can still
+  decrypt this repository's history from before the rotation commit. The
+  new password is shared out-of-band the same way as the original. A
+  leaked password still requires changing the underlying secrets, not
+  just rotating the key.
 
 ## Git integration
 
@@ -215,6 +244,7 @@ rules:
 
 ## Out of scope for v1 (explicitly deprioritized)
 
-- Key rotation
-- Multiple keys per project / per environment
+- Concurrent/per-environment keys (e.g. different keys for staging vs.
+  prod within the same rule set) — only one sequential, project-wide
+  version history (see Key rotation) is supported.
 - Audit logging

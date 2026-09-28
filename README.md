@@ -108,12 +108,101 @@ git check-attr filter -- <path>   # should report "filter: nebel"
 | Command | What it does |
 | --- | --- |
 | `nebel init [--password-stdin]` | Bootstrap a repo, or join one with the shared password |
+| `nebel init --version N [--password-stdin]` | Fetch and register locally a specific (possibly older) key version, e.g. after `nebel rotate` |
 | `nebel add file <glob>` | Encrypt whole files matching a glob |
 | `nebel add field <file> [path...]` | Encrypt named values inside a file; with no paths, pick them interactively |
+| `nebel rotate [--password-stdin]` | Mint a new key version with a new password, and re-encrypt everything under it |
 | `nebel version` | Print the build version |
 
 `nebel clean` and `nebel smudge` exist for git to call; you never run
 them yourself.
+
+## Pulling after a teammate rotates
+
+`nebel rotate` re-encrypts every secret it can reach onto the new
+version, so the commit it produces changes those files' ciphertext, not
+just `.nebel.yaml`. A plain `git pull` on another clone still succeeds
+once that commit lands, even though this clone doesn't have the new key
+yet — the changed files just land as ciphertext, with a warning:
+
+```
+$ git pull
+warning: nebel: secrets/prod.pem needs key version 2 — left encrypted; was the key rotated? run `nebel init` with the new password
+Fast-forward
+ .nebel.yaml      | 6 +++---
+ secrets/prod.pem | 2 +-
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+```
+
+That's the same state a brand-new clone is in before its first `nebel
+init`: filter-managed content sitting as ciphertext, `git status`
+reporting nothing locally modified. Run `nebel init` with the new
+password to decrypt it in place, exactly like joining any other repo:
+
+```sh
+git pull
+nebel init   # with the new password
+```
+
+No other recovery steps are needed, and nothing is lost if you run
+`nebel init` some time after the pull rather than immediately — the
+ciphertext just sits there, unreadable without the new key, until you do.
+
+## Upgrading from a pre-rotation repository
+
+Key rotation (`nebel rotate`, above) changed the `ENC[...]` tag format:
+every tag now records which key version produced it. A repository created
+by a build from before rotation existed (v0.3.0 or earlier) has tags with
+no version at all, and the new build refuses to parse those — including
+in its own committed config's canary, which every command checks first.
+There is no automatic migration: `nebel init`, `nebel rotate`, and even
+`git add --renormalize` all fail the same way until the config is fixed.
+
+The fix is two hand-edits to `.nebel.yaml`, not per-file surgery — do this
+from a machine whose working tree is currently decrypted (i.e. any
+machine using the repo normally, with every managed file checked out and
+readable — not one that's only ever seen ciphertext passthrough):
+
+1. Add a `key_version: 1` line to `.nebel.yaml`.
+2. In its `canary` field, insert `key:1,` right after the algorithm name,
+   e.g. `ENC[AES256_SIV,data:...]` becomes
+   `ENC[AES256_SIV,key:1,data:...]`.
+3. Run `git add --renormalize -- .`.
+4. Confirm nothing old-format survived: `git grep --cached -F
+   'ENC[AES256_SIV,data:'` must find nothing. Anything it lists is a file
+   or field this machine never had decrypted, so renormalize saw it
+   already starting with `ENC[` and left it alone instead of re-encrypting
+   it — run the migration again from a machine that does have it
+   decrypted, or decrypt-and-recommit that path specifically first.
+5. Commit.
+
+Step 3 re-encrypts every already-decrypted file/field from scratch under
+the new (current build's) tag format — it does not need to touch any
+already-committed ciphertext by hand, because renormalizing re-cleans
+from whatever the working tree currently holds, which for an
+actively-used clone is the plaintext, not the old blob. Step 4 exists
+because that shortcut silently does nothing for a file this machine
+couldn't decrypt.
+
+Every clone and CI job must upgrade its `nebel` binary before pulling the
+migration commit — the old binary can't read the new tag format, and vice
+versa; there is no build that reads both. A clone that already ran the old
+`nebel init` doesn't need to run it again: its key is registered under the
+same local git config name this build still reads. But pulling the
+migration commit itself needs one precaution: if git happens to re-smudge
+a managed file before it updates the working tree's `.nebel.yaml`, that
+smudge reads the *old* `.nebel.yaml` still on disk and fails the canary
+check. Avoid that ordering risk with:
+
+```sh
+git fetch
+git checkout @{u} -- .nebel.yaml   # not filter-managed, always safe
+git pull
+```
+
+History from before the migration commit remains unreadable to the new
+build — checking out an old commit's content still requires an old
+binary, the same way any other breaking format change would.
 
 ## Licence
 

@@ -58,3 +58,19 @@ command-line password argument.
 - **AC-7.13**: in join mode with no password from any source, `init`
   prompts on a terminal with echo disabled; with no terminal it fails,
   naming the alternatives, and registers nothing.
+
+### Fetching an older key version (spec 11)
+
+Plain `init` always targets the config's *current* `key_version` — this
+is unchanged by rotation existing at all, and `--version` is never
+required for day-to-day bootstrap/join.
+
+- **AC-7.14**: `init --version N [password]` derives and verifies the key
+  for version `N` specifically (its salt/canary found via spec 04's
+  historical lookup) and adds it to the local keyring alongside whatever
+  is already cached — it does not disturb the current version's entry.
+- **AC-7.15**: it also re-checks-out managed files (AC-7.8), so any file
+  that previously failed to decrypt for lacking version `N` becomes
+  readable immediately.
+- **AC-7.16**: an `N` that never existed in `.nebel.yaml`'s history fails
+  with a clear error, and registers nothing for that version.

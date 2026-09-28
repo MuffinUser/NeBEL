@@ -488,17 +488,15 @@ func TestFreshCloneAfterRotateDecryptsEverythingWithNewPasswordAlone(t *testing.
 
 // Eager re-encryption's cost: since rotate now changes the committed
 // ciphertext of existing files (not just .nebel.yaml), an existing
-// clone's plain `git pull` after that commit fails — git tries to smudge
-// the changed blob with a key this clone doesn't have yet, and
-// filter.nebel.required means that error aborts the pull rather than
-// passing through. This locks in the recipe that recovers from it: pull
-// the raw config first (bypassing the filter machinery entirely, since
-// `git show ... > file` never touches the index), register the new key,
-// then re-stage before pulling so git sees nothing "locally modified" to
-// protect. AES-SIV's determinism (same key + plaintext + AAD always
-// produces the same ciphertext) is what makes the re-staged blob match
-// the incoming commit exactly, letting the pull fast-forward cleanly.
-func TestExistingCloneRecoversAfterRotateViaDocumentedRecipe(t *testing.T) {
+// clone's next `git pull` needs to smudge the changed blob with a key it
+// doesn't have yet. Rather than aborting the whole git operation (spec 06
+// AC-6.11's old behavior), smudge passes the ciphertext through and warns
+// (filterop.Skipped) — so the pull itself succeeds, leaving that file
+// exactly as "clean" as a brand-new clone would see it before its first
+// `nebel init`: still encrypted, `git status` reporting nothing locally
+// modified. `nebel init` with the new password then decrypts it in place,
+// same as any other join.
+func TestExistingCloneRecoversAfterRotateWithPlainPull(t *testing.T) {
 	pathEnv := pathEnvWithBin(t)
 	origin, plaintext := setupEncryptedOrigin(t, pathEnv, "origin-password")
 	clone := cloneOf(t, pathEnv, origin)
@@ -510,45 +508,125 @@ func TestExistingCloneRecoversAfterRotateViaDocumentedRecipe(t *testing.T) {
 	}
 	runIn(t, origin, pathEnv, "git", "commit", "-q", "-am", "rotate encryption key")
 
-	// The naive path fails, loudly, rather than silently corrupting
-	// anything: filter.nebel.required aborts the merge partway through,
-	// having already deleted secrets/prod.pem to re-create it from the
-	// incoming (still unreadable) blob. The recovery recipe below must
-	// work from exactly this half-updated state, not a clean one.
-	if _, err := runInExpectingError(t, clone, pathEnv, "git", "pull"); err == nil {
-		t.Fatal("plain `git pull` after a rotation that changed ciphertext: want it to fail, got success")
+	// A plain pull succeeds — no recovery dance needed — and warns on
+	// stderr about the field it couldn't reach rather than erroring.
+	pullOut := runIn(t, clone, pathEnv, "git", "pull")
+	if !strings.Contains(pullOut, "secrets/prod.pem") || !strings.Contains(pullOut, "needs key version 2") {
+		t.Errorf("pull did not warn about the field it left encrypted:\n%s", pullOut)
 	}
-	if _, statErr := os.Stat(filepath.Join(clone, "secrets", "prod.pem")); !os.IsNotExist(statErr) {
-		t.Fatalf("test setup does not reflect the half-updated state the recipe must recover from: secrets/prod.pem stat error = %v", statErr)
+	if !strings.Contains(pullOut, "Fast-forward") {
+		t.Errorf("pull did not fast-forward cleanly:\n%s", pullOut)
 	}
 
-	// The recovery recipe: fetch, land the new config via a plumbing read
-	// that never invokes a filter, register the new key (which also
-	// restores the file the failed pull above just deleted), re-stage so
-	// the index already matches what's incoming, then pull.
-	runIn(t, clone, pathEnv, "git", "fetch", "-q")
-	newConfig := runIn(t, clone, pathEnv, "git", "show", "@{u}:.nebel.yaml")
-	if err := os.WriteFile(filepath.Join(clone, config.FileName), []byte(newConfig), 0o644); err != nil {
+	stillEncrypted, err := os.ReadFile(filepath.Join(clone, "secrets", "prod.pem"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if out, err := runInitWith(t, clone, pathEnv, []string{passwordEnv + "=rotated-password"}, ""); err != nil {
-		t.Fatalf("nebel init (recovery, new password): %v\n%s", err, out)
+	if !strings.HasPrefix(string(stillEncrypted), "ENC[") {
+		t.Fatalf("after the pull, secrets/prod.pem = %q, want it left as ciphertext", stillEncrypted)
 	}
-	runIn(t, clone, pathEnv, "git", "add", "-u")
-	runIn(t, clone, pathEnv, "git", "pull", "-q")
+	if status := strings.TrimSpace(runIn(t, clone, pathEnv, "git", "status", "--porcelain")); status != "" {
+		t.Errorf("pull left the working tree looking locally modified:\n%s", status)
+	}
+
+	// A forced renormalize (the "is this really clean" check): with
+	// nothing decryptable yet, clean has nothing new to encrypt (the
+	// field is already tagged) and so needs no key at all — it must not
+	// error, and must stage nothing.
+	runIn(t, clone, pathEnv, "git", "add", "--renormalize", "--", ".")
+	if staged := strings.TrimSpace(runIn(t, clone, pathEnv, "git", "diff", "--cached", "--name-only")); staged != "" {
+		t.Errorf("renormalize on undecryptable content staged something: %q", staged)
+	}
+
+	// `nebel init` with the new password decrypts in place, exactly like
+	// joining a repo for the first time.
+	out, err = runInitWith(t, clone, pathEnv, []string{passwordEnv + "=rotated-password"}, "")
+	if err != nil {
+		t.Fatalf("nebel init (new password): %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "1 file decrypted locally") {
+		t.Errorf("init did not report the field decrypted:\n%s", out)
+	}
 
 	got, err := os.ReadFile(filepath.Join(clone, "secrets", "prod.pem"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != plaintext {
-		t.Errorf("after recovery, content = %q, want decrypted %q", got, plaintext)
+		t.Errorf("after init, content = %q, want decrypted %q", got, plaintext)
 	}
 	if status := strings.TrimSpace(runIn(t, clone, pathEnv, "git", "status", "--porcelain")); status != "" {
-		t.Errorf("recovery left the working tree dirty:\n%s", status)
+		t.Errorf("init left the working tree dirty:\n%s", status)
 	}
-	if head := strings.TrimSpace(runIn(t, clone, pathEnv, "git", "log", "-1", "--format=%s")); head != "rotate encryption key" {
-		t.Errorf("clone's HEAD after recovery = %q, want the rotation commit", head)
+}
+
+// The mode: value counterpart of
+// TestExistingCloneRecoversAfterRotateWithPlainPull: the same graceful
+// pull, and forced-renormalize-is-a-no-op check, for a per-field secret —
+// this is what actually exercises cleanValues's haveKey gate (Clean must
+// not demand the current version's key just to leave an already-tagged
+// field alone), as opposed to the whole-file path Clean takes for
+// secrets/prod.pem.
+func TestExistingCloneRecoversAfterRotateWithPlainPullValueMode(t *testing.T) {
+	pathEnv := pathEnvWithBin(t)
+	origin := setupValueRepo(t, pathEnv)
+	runIn(t, origin, pathEnv, "nebel", "add", "field", "config/staging.yaml", "database.password")
+	runIn(t, origin, pathEnv, "git", "add", ".")
+	runIn(t, origin, pathEnv, "git", "commit", "-q", "-m", "encrypt database.password")
+
+	clone := cloneOf(t, pathEnv, origin)
+	initWithPassword(t, clone, pathEnv, "value-mode-password")
+
+	out, err := runRotateWith(t, origin, pathEnv, []string{passwordEnv + "=rotated-password"}, "")
+	if err != nil {
+		t.Fatalf("nebel rotate: %v\n%s", err, out)
+	}
+	runIn(t, origin, pathEnv, "git", "commit", "-q", "-am", "rotate encryption key")
+
+	pullOut := runIn(t, clone, pathEnv, "git", "pull")
+	if !strings.Contains(pullOut, "config/staging.yaml") || !strings.Contains(pullOut, "database.password") || !strings.Contains(pullOut, "needs key version 2") {
+		t.Errorf("pull did not warn about the field it left encrypted:\n%s", pullOut)
+	}
+	if !strings.Contains(pullOut, "Fast-forward") {
+		t.Errorf("pull did not fast-forward cleanly:\n%s", pullOut)
+	}
+
+	stagedYAML, err := os.ReadFile(filepath.Join(clone, "config", "staging.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stagedYAML), `password: "ENC[`) {
+		t.Fatalf("after the pull, database.password was not left as ciphertext:\n%s", stagedYAML)
+	}
+	if status := strings.TrimSpace(runIn(t, clone, pathEnv, "git", "status", "--porcelain")); status != "" {
+		t.Errorf("pull left the working tree looking locally modified:\n%s", status)
+	}
+
+	runIn(t, clone, pathEnv, "git", "add", "--renormalize", "--", ".")
+	if staged := strings.TrimSpace(runIn(t, clone, pathEnv, "git", "diff", "--cached", "--name-only")); staged != "" {
+		t.Errorf("renormalize on undecryptable content staged something: %q", staged)
+	}
+
+	out, err = runInitWith(t, clone, pathEnv, []string{passwordEnv + "=rotated-password"}, "")
+	if err != nil {
+		t.Fatalf("nebel init (new password): %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "1 file decrypted locally") {
+		t.Errorf("init did not report the field decrypted:\n%s", out)
+	}
+
+	got, err := os.ReadFile(filepath.Join(clone, "config", "staging.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "ENC[") {
+		t.Errorf("after init, content still encrypted:\n%s", got)
+	}
+	if !strings.Contains(string(got), `password: "s3cr3t"`) {
+		t.Errorf("after init, database.password was not decrypted back to its original value:\n%s", got)
+	}
+	if status := strings.TrimSpace(runIn(t, clone, pathEnv, "git", "status", "--porcelain")); status != "" {
+		t.Errorf("init left the working tree dirty:\n%s", status)
 	}
 }
 

@@ -13,9 +13,10 @@ import (
 // The full recovery story spec 11 depends on: after a rotation, a fresh
 // clone's plain `nebel init` (at the new current version) cannot decrypt
 // content still tagged with the old version — that's expected, not an
-// error, and it must not destroy the ciphertext (AC-6.11, and the
-// CheckoutAll fix that makes a per-file smudge failure not take out every
-// other managed file with it). `nebel init --version N` (spec 07
+// error. Smudge passes it through as ciphertext instead of failing (spec
+// 06 AC-6.11), and `nebel init`'s own post-checkout scan (cmd/nebel's
+// scanUndecrypted) reports it as still needing that version rather than
+// counting it as decrypted. `nebel init --version N` (spec 07
 // AC-7.14–7.16) with the old password then recovers it, without
 // disturbing the key the clone already registered.
 //
@@ -53,6 +54,9 @@ func TestInitVersionRecoversContentFromBeforeRotation(t *testing.T) {
 	}
 	if !strings.Contains(out, "secrets/prod.pem") || !strings.Contains(out, "needs key version 1") {
 		t.Errorf("init output does not name the still-undecryptable file and why:\n%s", out)
+	}
+	if !strings.Contains(out, "nebel init --version 1") {
+		t.Errorf("init output does not point at the fix:\n%s", out)
 	}
 
 	secretPath := filepath.Join(clone, "secrets", "prod.pem")

@@ -27,11 +27,13 @@ v2 --> v2 : smudge (keyring has 2)
 
 note right of v1
   if keyring lacks key 1:
-  smudge fails clearly —
+  smudge passes through as
+  ciphertext, warning
   "needs key version 1"
-  (run nebel init --version 1);
-  rotate itself refuses rather
-  than strand this field on v1
+  (spec 06 AC-6.11) instead
+  of aborting; rotate itself
+  still refuses rather than
+  strand this field on v1
 end note
 @enduml
 ```
@@ -76,10 +78,12 @@ up front or to pick up that lazy convergence afterward.
   re-encrypted — nothing else. The operator commits explicitly.
 - **AC-11.7 Output states the consequences**: output names the new
   version and how many files were re-encrypted, and states plainly that
-  once the resulting commit is pulled, other clones/CI need `nebel init`
-  again with the new password before they can read *or* write anything
-  the repo currently tracks — not only to write, since AC-11.4/AC-11.11
-  together guarantee nothing committed is left on an older version.
+  once the resulting commit exists, every field on this branch is tagged
+  the new version — so other clones/CI need `nebel init` again with the
+  new password before they can read *or* write any of it, not only to
+  write. Their next `git pull` still succeeds on its own (spec 06
+  AC-6.11's passthrough-with-warning); it's `nebel init` afterward that
+  actually decrypts it.
 - **AC-11.8 No secrets printed**: output never includes decrypted values
   — only the version number and, when generated, the new password
   (printed exactly once).

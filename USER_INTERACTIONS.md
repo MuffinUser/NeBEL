@@ -198,15 +198,14 @@ Staged:
 Commit when ready:
   git commit -m "rotate encryption key"
 
-Once that commit exists, every field on this branch is tagged version
-3 — a plain `git pull` on another clone will fail (it needs the new key
-to read the changed files) until that clone runs:
+Once that commit exists, every field on this branch is tagged version 3.
+Another clone's next `git pull` still succeeds — content it can't yet
+decrypt is left as ciphertext with a warning, the same as before its
+first `nebel init` — but it needs the new password to read or write any
+of it:
 
-  git fetch
-  git show @{u}:.nebel.yaml > .nebel.yaml   # not filter-managed, always safe
-  nebel init                                # with the new password
-  git add -u                                 # re-stage so nothing looks locally modified
   git pull
+  nebel init   # with the new password
 
 Rotation is forward-only: anyone who had the old password can still
 decrypt this repository's history from before the rotation commit. If it
@@ -235,12 +234,13 @@ leaked, change the underlying secrets too, not just the password.
 - Other clones/CI keep reading old content fine with their *current* key
   right up until they pull the rotation commit — after that, since
   rotation just re-encrypted everything on this branch, they need the new
-  password to read or write any of it. Because the commit changes the
-  ciphertext of already-tracked files (not just `.nebel.yaml`), their
-  plain `git pull` fails outright rather than degrading gracefully — see
-  the recipe above, and the README's "Pulling after a teammate rotates".
-  Merging in a different branch that was never rotated brings its
-  old-version content back, same as any other merge.
+  password to read or write any of it. Their plain `git pull` itself
+  still succeeds even though the commit changes the ciphertext of
+  already-tracked files: smudge passes the changed content through as
+  ciphertext and warns rather than aborting the pull (spec 06 AC-6.11) —
+  see the README's "Pulling after a teammate rotates". Merging in a
+  different branch that was never rotated brings its old-version content
+  back, same as any other merge.
 
 ## Command surface summary
 

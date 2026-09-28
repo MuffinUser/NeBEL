@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -212,18 +213,67 @@ func joinRepo(root, configPath, password string) error {
 	if err != nil {
 		return fmt.Errorf("re-checking out files: %w", err)
 	}
-	reportCheckoutResult(decrypted, failures)
-	return nil
+	return reportCheckoutResult(root, cfg, decrypted, failures)
 }
 
 // reportCheckoutResult prints CheckoutAll's outcome for join and
 // --version alike: a plain "N decrypted" success, a diagnostic for
 // "nothing is wired to the filter at all" (total == 0), or — with
-// failures — each path alongside git's own reason (e.g. AC-6.11's
-// "needs key version N", routine after `nebel rotate`; or AC-6.9's
-// tamper error, which is not) rather than guessing a single cause for
-// all of them.
-func reportCheckoutResult(decrypted int, failures []gitutil.CheckoutFailure) {
+// failures — each path and why, sourced two ways. CheckoutAll's own
+// failures are genuine per-file checkout errors (AC-6.9's tamper error,
+// say). But smudge no longer errors just because a version is missing
+// (spec 06 AC-6.11): it passes the content through instead, with a
+// warning already printed live during the checkout above, and
+// CheckoutAll counts that as "decrypted" since the checkout itself
+// succeeded. scanUndecrypted re-inspects the working tree afterward to
+// catch exactly that gap, moving each still-encrypted path from
+// "decrypted" to the report below (skipping any path CheckoutAll already
+// flagged, so a genuine failure isn't listed twice under two different
+// reasons).
+func reportCheckoutResult(root string, cfg *config.Config, decrypted int, failures []gitutil.CheckoutFailure) error {
+	alreadyReported := make(map[string]bool, len(failures))
+	for _, f := range failures {
+		alreadyReported[f.Path] = true
+	}
+
+	stillEncrypted, err := scanUndecrypted(root, cfg)
+	if err != nil {
+		return fmt.Errorf("checking what's still encrypted: %w", err)
+	}
+	byPath := map[string][]stuckContent{}
+	var order []string
+	for _, s := range stillEncrypted {
+		if alreadyReported[s.Path] {
+			continue
+		}
+		if _, seen := byPath[s.Path]; !seen {
+			order = append(order, s.Path)
+		}
+		byPath[s.Path] = append(byPath[s.Path], s)
+	}
+	sort.Strings(order)
+	for _, path := range order {
+		var reasons []string
+		for _, s := range byPath[path] {
+			reason := s.describe()
+			if s.Version >= 0 {
+				// Unlike rotate's refusal error (which only ever finds
+				// this from a clone that already holds the *current*
+				// version's key, so every hint there is `--version N`),
+				// init can hit either case: the version just rotated
+				// past current, or an older one this clone never
+				// fetched — worth spelling out which fix applies.
+				reason = fmt.Sprintf("%s — %s", reason, fixHint(cfg, s.Version))
+			}
+			if s.Field != "" {
+				reason = fmt.Sprintf("at %s, %s", s.Field, reason)
+			}
+			reasons = append(reasons, reason)
+		}
+		failures = append(failures, gitutil.CheckoutFailure{Path: path, Reason: strings.Join(reasons, "; ")})
+		decrypted--
+	}
+
 	total := decrypted + len(failures)
 	if total == 0 {
 		// The password/version was right, so the key is fine — but
@@ -235,16 +285,17 @@ func reportCheckoutResult(decrypted int, failures []gitutil.CheckoutFailure) {
 			"  Check that %s is committed and lists your patterns:\n"+
 			"    git check-attr filter -- <path>   should report \"filter: nebel\"\n",
 			gitattributesName)
-		return
+		return nil
 	}
 	if len(failures) == 0 {
 		fmt.Printf("Done. %s decrypted locally.\n", plural(decrypted, "file"))
-		return
+		return nil
 	}
 	fmt.Printf("Done. %s decrypted locally; %s could not be:\n", plural(decrypted, "file"), plural(len(failures), "file"))
 	for _, f := range failures {
 		fmt.Printf("  %s: %s\n", f.Path, f.Reason)
 	}
+	return nil
 }
 
 // initVersion implements `nebel init --version N [password]` (spec 07
@@ -292,8 +343,7 @@ func initVersion(root, configPath string, version int, password string) error {
 	if err != nil {
 		return fmt.Errorf("re-checking out files: %w", err)
 	}
-	reportCheckoutResult(decrypted, failures)
-	return nil
+	return reportCheckoutResult(root, cfg, decrypted, failures)
 }
 
 func registerFilter() error {

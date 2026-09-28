@@ -102,7 +102,7 @@ func TestSmudgeGoldenFixture(t *testing.T) {
 
 	for repoPath, want := range goldenPlaintexts() {
 		t.Run(repoPath, func(t *testing.T) {
-			got, err := Smudge(cfg, keyring, repoPath, readGoldenFile(t, repoPath))
+			got, _, err := Smudge(cfg, keyring, repoPath, readGoldenFile(t, repoPath))
 			if err != nil {
 				t.Fatalf("committed secrets no longer decrypt: %v", err)
 			}
@@ -140,7 +140,7 @@ func TestGoldenFixtureStaysBoundToItsPath(t *testing.T) {
 	cfg, keyring := loadGoldenRepo(t)
 
 	blob := readGoldenFile(t, "secrets/prod.pem")
-	plaintext, err := Smudge(cfg, keyring, "secrets/every-byte.pem", blob)
+	plaintext, _, err := Smudge(cfg, keyring, "secrets/every-byte.pem", blob)
 	if err == nil {
 		t.Fatalf("blob decrypted under another file's path, got %q", plaintext)
 	}

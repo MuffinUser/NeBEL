@@ -5,6 +5,7 @@ package filterop
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -62,7 +63,7 @@ func TestValueRoundTripLeavesUntouchedBytesExact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
-	smudged, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned)
+	smudged, _, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned)
 	if err != nil {
 		t.Fatalf("Smudge: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestValueRoundTripNormalizesPlainStringQuoting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
-	smudged, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned)
+	smudged, _, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned)
 	if err != nil {
 		t.Fatalf("Smudge: %v", err)
 	}
@@ -114,7 +115,7 @@ func TestValueRoundTripPreservesType(t *testing.T) {
 	if !strings.Contains(string(cleaned), "type:int") {
 		t.Errorf("the integer's type was not recorded in the tag:\n%s", cleaned)
 	}
-	smudged, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned)
+	smudged, _, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned)
 	if err != nil {
 		t.Fatalf("Smudge: %v", err)
 	}
@@ -155,10 +156,55 @@ func TestCleanValuesSkipsAlreadyEncrypted(t *testing.T) {
 	}
 }
 
+// The bug this guards against: Clean must not require the current
+// version's key merely because a field's value already carries an
+// ENC[...] tag from an earlier version — requiring it there would break
+// git's routine re-invocation of clean on already-converged content (a
+// racily-clean index refresh, `git add -u`, `git status`, `git add
+// --renormalize`) for any clone that has fallen behind a rotation it
+// hasn't rejoined yet. Nothing here needs encrypting, so nothing here
+// should demand a key.
+func TestCleanValuesNoKeyNeededWhenNothingToEncrypt(t *testing.T) {
+	cfg := valueConfig("database.password")
+	// Pre-tag the field under version 1 — this clone, right now, has no
+	// key at all, current or otherwise.
+	already, err := Clean(cfg, Keyring{1: testKey}, "config/staging.yaml", []byte(valueDoc))
+	if err != nil {
+		t.Fatalf("clean under v1: %v", err)
+	}
+
+	current2 := &config.Config{KeyVersion: 2, Rules: cfg.Rules}
+	got, err := Clean(current2, Keyring{}, "config/staging.yaml", already)
+	if err != nil {
+		t.Fatalf("Clean() with no keys registered: want success (nothing to encrypt), got %v", err)
+	}
+	if !bytes.Equal(got, already) {
+		t.Errorf("Clean() changed already-tagged content: got %q, want unchanged %q", got, already)
+	}
+}
+
+// The counterpart: a field that still needs encrypting still requires
+// the current version's key, even alongside another field in the same
+// document that's already tagged and needs no key at all.
+func TestCleanValuesStillNeedsKeyForUnencryptedField(t *testing.T) {
+	cfg := valueConfig("database.password", "api.token")
+	// Pre-tag only database.password, under version 1; api.token is still
+	// plaintext.
+	partiallyCleaned, err := Clean(valueConfig("database.password"), Keyring{1: testKey}, "config/staging.yaml", []byte(valueDoc))
+	if err != nil {
+		t.Fatalf("clean under v1: %v", err)
+	}
+
+	current2 := &config.Config{KeyVersion: 2, Rules: cfg.Rules}
+	if _, err := Clean(current2, Keyring{1: testKey}, "config/staging.yaml", partiallyCleaned); !errors.Is(err, ErrKeyVersionMissing) {
+		t.Fatalf("Clean() error = %v, want %v", err, ErrKeyVersionMissing)
+	}
+}
+
 // AC-6.7: a file whose fields are still plaintext (staged before the
 // filter was registered) passes through smudge untouched.
 func TestSmudgeValuesTolerantOfPlaintext(t *testing.T) {
-	got, err := Smudge(valueConfig(), testKeyring, "config/staging.yaml", []byte(valueDoc))
+	got, _, err := Smudge(valueConfig(), testKeyring, "config/staging.yaml", []byte(valueDoc))
 	if err != nil {
 		t.Fatalf("Smudge: %v", err)
 	}
@@ -191,7 +237,7 @@ func TestSmudgeValuesSurfacesTampering(t *testing.T) {
 	tampered := bytes.Clone(cleaned)
 	tampered[idx] ^= 1
 
-	if _, err := Smudge(valueConfig(), testKeyring, "config/staging.yaml", tampered); err == nil {
+	if _, _, err := Smudge(valueConfig(), testKeyring, "config/staging.yaml", tampered); err == nil {
 		t.Error("Smudge on a tampered tag: want an error, got nil")
 	}
 }
@@ -207,7 +253,7 @@ func TestValueTagIsBoundToItsField(t *testing.T) {
 	tagText := string(cleaned[bytes.Index(cleaned, []byte(`"ENC[`)) : bytes.Index(cleaned, []byte("]\""))+2])
 	moved := strings.Replace(valueDoc, "token: alpha", "token: "+tagText, 1)
 
-	if _, err := Smudge(valueConfig("api.token"), testKeyring, "config/staging.yaml", []byte(moved)); err == nil {
+	if _, _, err := Smudge(valueConfig("api.token"), testKeyring, "config/staging.yaml", []byte(moved)); err == nil {
 		t.Error("a tag moved to another field still decrypted")
 	}
 }
@@ -228,7 +274,7 @@ func TestValuesUnsupportedFormatFails(t *testing.T) {
 // guessing one would silently change the document's shape.
 func TestSmudgeValuesRejectsUntypedTag(t *testing.T) {
 	doc := strings.Replace(valueDoc, `password: "s3cr3t"`, `password: "`+tag.Encode([]byte("whatever"), 1)+`"`, 1)
-	if _, err := Smudge(valueConfig(), testKeyring, "config/staging.yaml", []byte(doc)); err == nil {
+	if _, _, err := Smudge(valueConfig(), testKeyring, "config/staging.yaml", []byte(doc)); err == nil {
 		t.Error("Smudge on an untyped tag: want an error, got nil")
 	}
 }

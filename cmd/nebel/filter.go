@@ -20,7 +20,30 @@ func runClean(args []string) error {
 }
 
 func runSmudge(args []string) error {
-	return runFilter(args, "smudge", filterop.Smudge)
+	return runFilter(args, "smudge", func(cfg *config.Config, keyring filterop.Keyring, filePath string, input []byte) ([]byte, error) {
+		output, skipped, err := filterop.Smudge(cfg, keyring, filePath, input)
+		for _, s := range skipped {
+			warnSkipped(cfg, filePath, s)
+		}
+		return output, err
+	})
+}
+
+// warnSkipped reports one filterop.Skipped to stderr — visible directly
+// on the terminal for whatever git operation (pull, checkout, merge)
+// triggered the smudge, since filter stderr passes straight through.
+// Stdout is reserved for the transformed content the git filter protocol
+// expects, so this can never go there.
+func warnSkipped(cfg *config.Config, filePath string, s filterop.Skipped) {
+	fix := fixHint(cfg, s.Version)
+	if s.Version == cfg.CurrentVersion() {
+		fix = "was the key rotated? " + fix
+	}
+	if s.Field == "" {
+		fmt.Fprintf(os.Stderr, "warning: nebel: %s needs key version %d — left encrypted; %s\n", filePath, s.Version, fix)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "warning: nebel: %s at %s needs key version %d — left encrypted; %s\n", filePath, s.Field, s.Version, fix)
 }
 
 type filterFunc func(cfg *config.Config, keyring filterop.Keyring, filePath string, input []byte) ([]byte, error)
@@ -29,12 +52,14 @@ type filterFunc func(cfg *config.Config, keyring filterop.Keyring, filePath stri
 // `nebel clean %f` / `nebel smudge %f`, with file content on stdin
 // and the transformed content expected on stdout.
 //
-// Per spec 06 AC-6.6, the only case that passes input through unchanged
-// without error is an *empty* local keyring (nobody has run `nebel
-// init` on this clone yet) — every other failure (bad config, tampered
-// ciphertext, wrong key, missing key version) is reported and aborts the
-// git operation, since git.config filter.nebel.required is set to true at
-// registration.
+// Two cases pass input through unchanged without error: an *empty* local
+// keyring (nobody has run `nebel init` on this clone yet, AC-6.6), and —
+// smudge only — a well-formed tag naming a version the keyring doesn't
+// hold (AC-6.11), which instead prints a warning (see warnSkipped) rather
+// than aborting. Every other failure (bad config, tampered ciphertext,
+// wrong key, clean with no key for content that still needs encrypting)
+// is reported and aborts the git operation, since git.config
+// filter.nebel.required is set to true at registration.
 func runFilter(args []string, name string, fn filterFunc) error {
 	if len(args) != 1 {
 		return fmt.Errorf("usage: nebel %s <path>", name)

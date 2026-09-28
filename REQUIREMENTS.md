@@ -54,8 +54,9 @@ with transparent local decryption for developers.
   migrates the ordinary way, lazily, the next time it's edited and
   staged. This is also what makes a branch encrypted under an older
   version safe to merge later: only the fields still on that version need
-  it, with a clear "needs key version N" error if it's missing, and they
-  self-heal on their next edit.
+  it, and a missing one is left as ciphertext with a warning naming which
+  version it needs, rather than blocking the merge — they self-heal on
+  their next edit, or once the operator registers that version's key.
 - **Forward-only, distribution unchanged**: rotation only protects *new*
   encryption going forward — anyone who had the old password can still
   decrypt this repository's history from before the rotation commit. The

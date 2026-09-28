@@ -121,42 +121,32 @@ them yourself.
 
 `nebel rotate` re-encrypts every secret it can reach onto the new
 version, so the commit it produces changes those files' ciphertext, not
-just `.nebel.yaml`. A plain `git pull` on another clone fails once that
-commit lands — git needs the new key to smudge the changed files, and
-this clone doesn't have it yet:
+just `.nebel.yaml`. A plain `git pull` on another clone still succeeds
+once that commit lands, even though this clone doesn't have the new key
+yet — the changed files just land as ciphertext, with a warning:
 
 ```
-error: external filter 'nebel smudge %f' failed
-fatal: <path>: smudge filter nebel failed
+$ git pull
+warning: nebel: secrets/prod.pem needs key version 2 — left encrypted; was the key rotated? run `nebel init` with the new password
+Fast-forward
+ .nebel.yaml      | 6 +++---
+ secrets/prod.pem | 2 +-
+ 2 files changed, 4 insertions(+), 4 deletions(-)
 ```
 
-Commit or stash any unrelated uncommitted work first — the recipe stages
-every locally modified tracked file, not only the rotation fallout. Then
-recover with:
+That's the same state a brand-new clone is in before its first `nebel
+init`: filter-managed content sitting as ciphertext, `git status`
+reporting nothing locally modified. Run `nebel init` with the new
+password to decrypt it in place, exactly like joining any other repo:
 
 ```sh
-git fetch
-git show @{u}:.nebel.yaml > .nebel.yaml   # not filter-managed, always safe
-nebel init                                 # with the new password
-git add -u                                 # re-stage so nothing looks locally modified
 git pull
+nebel init   # with the new password
 ```
 
-`git show ... > .nebel.yaml` writes the new config to disk without going
-through git's checkout machinery, so it never triggers the filter on
-anything else. `nebel init` reads that new config, verifies the new
-password against it, and registers the new key — re-checking out (and so
-decrypting) whatever existing content this clone already had keys for
-along the way, which also restores any file the earlier failed `git
-pull` deleted. `git add -u` then re-encrypts those files under the new
-key and re-stages them: since encryption here is deterministic (same
-key, same plaintext, same path always produce the same ciphertext), the
-result matches what's already committed exactly, so the follow-up `git
-pull` has nothing left to reconcile and fast-forwards cleanly. This
-recipe is safe to run even if a `git pull` already failed and left
-`.nebel.yaml` or a managed file in a half-updated state — no commit
-happened, and the steps above put both right without needing to discard
-anything.
+No other recovery steps are needed, and nothing is lost if you run
+`nebel init` some time after the pull rather than immediately — the
+ciphertext just sits there, unreadable without the new key, until you do.
 
 ## Upgrading from a pre-rotation repository
 

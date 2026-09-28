@@ -186,9 +186,12 @@ func IsShallow(repoRoot string) (bool, error) {
 
 // CheckoutFailure records why one managed file couldn't be re-smudged —
 // git's own trimmed error output, which already carries nebel's specific
-// message (e.g. AC-6.11's "needs key version N", or AC-6.9's tamper
-// error) rather than a cause CheckoutAll's caller would otherwise have to
-// guess at.
+// message (AC-6.9's tamper error, say) rather than a cause CheckoutAll's
+// caller would otherwise have to guess at. A missing key version is not
+// one of these: spec 06 AC-6.11 has smudge pass that content through as
+// ciphertext instead of failing, so CheckoutAll counts it as decrypted;
+// cmd/nebel's scanUndecrypted re-inspects the working tree afterward to
+// catch that gap for reporting.
 type CheckoutFailure struct {
 	Path   string
 	Reason string
@@ -207,12 +210,12 @@ type CheckoutFailure struct {
 //
 // Files are checked out one at a time rather than in a single `git
 // checkout HEAD -- <all paths>` call. A single call is all-or-nothing:
-// empirically, one path whose smudge fails (spec 06 AC-6.11 — a key
-// version this clone doesn't have yet, routine after `nebel rotate` —
-// or AC-6.9's tamper detection) aborts the whole command, and — since
-// every path was already removed above — leaves every managed file
-// missing from the working tree, not just the one that failed. Checking
-// out individually isolates that failure to just its own path, which
+// empirically, one path whose smudge fails (AC-6.9's tamper detection —
+// a missing key version, spec 06 AC-6.11, no longer fails here; it
+// passes through instead) aborts the whole command, and — since every
+// path was already removed above — leaves every managed file missing
+// from the working tree, not just the one that failed. Checking out
+// individually isolates that failure to just its own path, which
 // CheckoutAll then falls back to restoring as raw ciphertext (via Show,
 // which bypasses filters) so it at least matches the pre-CheckoutAll
 // passthrough state instead of being left deleted, and reports git's own

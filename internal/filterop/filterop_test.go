@@ -61,6 +61,24 @@ func TestCleanSkipsAlreadyEncrypted(t *testing.T) {
 	}
 }
 
+// The whole-file counterpart of TestCleanValuesNoKeyNeededWhenNothingToEncrypt:
+// content that's already a well-formed ENC[...] tag needs no key at all
+// to clean, current version or otherwise, since there's nothing left to
+// encrypt — this is what keeps git's routine re-invocation of clean (a
+// racily-clean index refresh, `git add -u`, `git add --renormalize`)
+// from hard-failing on a clone that's fallen behind a rotation it hasn't
+// rejoined yet.
+func TestCleanWholeFileNoKeyNeededWhenAlreadyEncrypted(t *testing.T) {
+	already := tag.Encode([]byte("some-ciphertext"), 1)
+	got, err := Clean(configAtVersion(2), Keyring{}, "secrets/prod.pem", []byte(already))
+	if err != nil {
+		t.Fatalf("Clean() with no keys registered: want success (nothing to encrypt), got %v", err)
+	}
+	if string(got) != already {
+		t.Errorf("Clean() changed already-tagged content: got %q, want unchanged %q", got, already)
+	}
+}
+
 // AC-6.5: smudge(clean(input)) == input byte-for-byte, for whole-file mode.
 func TestRoundTrip(t *testing.T) {
 	inputs := [][]byte{
@@ -73,7 +91,7 @@ func TestRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Clean: %v", err)
 		}
-		smudged, err := Smudge(testConfig(), testKeyring, "secrets/prod.pem", cleaned)
+		smudged, _, err := Smudge(testConfig(), testKeyring, "secrets/prod.pem", cleaned)
 		if err != nil {
 			t.Fatalf("Smudge: %v", err)
 		}
@@ -94,7 +112,7 @@ func TestUnmatchedFilePassesThrough(t *testing.T) {
 		t.Errorf("Clean() on an unmatched file changed the content: %q", cleaned)
 	}
 
-	smudged, err := Smudge(testConfig(), testKeyring, "README.md", input)
+	smudged, _, err := Smudge(testConfig(), testKeyring, "README.md", input)
 	if err != nil {
 		t.Fatalf("Smudge: %v", err)
 	}
@@ -107,7 +125,7 @@ func TestUnmatchedFilePassesThrough(t *testing.T) {
 // file not yet migrated through clean) passes it through unchanged.
 func TestSmudgeTolerantOfPlaintext(t *testing.T) {
 	input := []byte("still plaintext, filter never registered when this was staged")
-	got, err := Smudge(testConfig(), testKeyring, "secrets/prod.pem", input)
+	got, _, err := Smudge(testConfig(), testKeyring, "secrets/prod.pem", input)
 	if err != nil {
 		t.Fatalf("Smudge: %v", err)
 	}
@@ -128,7 +146,7 @@ func TestSmudgeSurfacesTampering(t *testing.T) {
 	flipIdx := len("ENC[AES256_SIV,data:") + 2
 	tampered[flipIdx] ^= 1
 
-	plaintext, err := Smudge(testConfig(), testKeyring, "secrets/prod.pem", tampered)
+	plaintext, _, err := Smudge(testConfig(), testKeyring, "secrets/prod.pem", tampered)
 	if err == nil {
 		t.Fatalf("Smudge() on tampered ciphertext: want an error, got plaintext %q", plaintext)
 	}
@@ -145,7 +163,7 @@ func TestSmudgeWrongKey(t *testing.T) {
 		t.Fatalf("Clean: %v", err)
 	}
 	wrongKey := bytes.Repeat([]byte{0x99}, 64)
-	if _, err := Smudge(testConfig(), Keyring{1: wrongKey}, "secrets/prod.pem", cleaned); err == nil {
+	if _, _, err := Smudge(testConfig(), Keyring{1: wrongKey}, "secrets/prod.pem", cleaned); err == nil {
 		t.Error("Smudge() with the wrong key: want an error, got nil")
 	}
 }

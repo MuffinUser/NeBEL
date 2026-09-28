@@ -7,17 +7,14 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/MuffinUser/nebel/internal/config"
-	"github.com/MuffinUser/nebel/internal/format"
 	"github.com/MuffinUser/nebel/internal/gitutil"
 	"github.com/MuffinUser/nebel/internal/kdf"
 	"github.com/MuffinUser/nebel/internal/localkey"
-	"github.com/MuffinUser/nebel/internal/tag"
 )
 
 const rotateUsage = "usage: nebel rotate [--password-stdin]"
@@ -178,15 +175,13 @@ func printRotateSummary(newVersion int, generated bool, password string, migrate
 	fmt.Println("Commit when ready:")
 	fmt.Println(`  git commit -m "rotate encryption key"`)
 	fmt.Println()
-	fmt.Printf("Once that commit exists, every field on this branch is tagged version\n")
-	fmt.Printf("%d — a plain `git pull` on another clone will fail (it needs the new key\n", newVersion)
-	fmt.Printf("to read the changed files) until that clone runs:\n")
+	fmt.Printf("Once that commit exists, every field on this branch is tagged version %d.\n", newVersion)
+	fmt.Println("Another clone's next `git pull` still succeeds — content it can't yet")
+	fmt.Println("decrypt is left as ciphertext with a warning, the same as before its first")
+	fmt.Println("`nebel init` — but it needs the new password to read or write any of it:")
 	fmt.Println()
-	fmt.Println("  git fetch")
-	fmt.Println("  git show @{u}:.nebel.yaml > .nebel.yaml   # not filter-managed, always safe")
-	fmt.Printf("  nebel init                                # with the new password\n")
-	fmt.Println("  git add -u                                 # re-stage so nothing looks locally modified")
 	fmt.Println("  git pull")
+	fmt.Println("  nebel init   # with the new password")
 	fmt.Println()
 	fmt.Println("Rotation is forward-only: anyone who had the old password can still")
 	fmt.Println("decrypt this repository's history from before the rotation commit. If it")
@@ -194,75 +189,38 @@ func printRotateSummary(newVersion int, generated bool, password string, migrate
 }
 
 // checkFullyDecryptable reports an error naming every managed file or
-// field this clone cannot currently decrypt. Rotate's eager re-encryption
-// only ever re-cleans whatever the working tree already holds as
-// plaintext (clean skips anything still tagged, spec 06 AC-6.4, so it
-// never double-encrypts a value this clone can't read); anything that
-// currently shows up as ENC[...] here is content clean will keep skipping
-// forever, forever pinned to whatever version produced it. Rotating on
-// top of that would still succeed and would still mint a new version —
-// it would just quietly leave part of the repo unreadable under it,
-// which is exactly what rotate exists to prevent.
+// field this clone cannot currently decrypt (scanUndecrypted). Rotate's
+// eager re-encryption only ever re-cleans whatever the working tree
+// already holds as plaintext (clean skips anything still tagged, spec 06
+// AC-6.4, so it never double-encrypts a value this clone can't read);
+// anything that currently shows up as ENC[...] here is content clean
+// will keep skipping forever, forever pinned to whatever version
+// produced it. Rotating on top of that would still succeed and would
+// still mint a new version — it would just quietly leave part of the
+// repo unreadable under it, which is exactly what rotate exists to
+// prevent.
 func checkFullyDecryptable(root string, cfg *config.Config) error {
-	files, err := gitutil.ManagedFiles(root)
+	found, err := scanUndecrypted(root, cfg)
 	if err != nil {
 		return err
 	}
-
-	var stuck []string
-	for _, f := range files {
-		rule, ok := cfg.MatchRule(f)
-		if !ok {
-			continue
-		}
-		content, err := os.ReadFile(filepath.Join(root, f))
-		if err != nil {
-			stuck = append(stuck, fmt.Sprintf("  %s (could not be read: %v)", f, err))
-			continue
-		}
-
-		if rule.Mode != config.ModeValue {
-			if tag.IsEncrypted(content) {
-				stuck = append(stuck, fmt.Sprintf("  %s (%s)", f, describeTag(content)))
-			}
-			continue
-		}
-
-		handler, err := format.For(f)
-		if err != nil {
-			return fmt.Errorf("checking %s: %w", f, err)
-		}
-		for _, field := range rule.Encrypt {
-			span, err := handler.Locate(content, field)
-			if err != nil {
-				return fmt.Errorf("checking %s: %w", f, err)
-			}
-			if tag.IsEncrypted([]byte(span.Value)) {
-				stuck = append(stuck, fmt.Sprintf("  %s at %s (%s)", f, field, describeTag([]byte(span.Value))))
-			}
-		}
-	}
-	if len(stuck) == 0 {
+	if len(found) == 0 {
 		return nil
 	}
 
-	sort.Strings(stuck)
+	lines := make([]string, len(found))
+	for i, s := range found {
+		if s.Field == "" {
+			lines[i] = fmt.Sprintf("  %s (%s)", s.Path, s.describe())
+		} else {
+			lines[i] = fmt.Sprintf("  %s at %s (%s)", s.Path, s.Field, s.describe())
+		}
+	}
+	sort.Strings(lines)
 	return fmt.Errorf(
 		"rotate refused: this clone cannot currently decrypt everything it manages, "+
 			"so rotating would strand the following on their existing version instead of "+
 			"converging them onto the new one — register the missing key version(s) with "+
 			"`nebel init --version N` and try again:\n%s",
-		strings.Join(stuck, "\n"))
-}
-
-// describeTag names the key version a still-encrypted span is stuck on,
-// for checkFullyDecryptable's error — falling back to a generic label if
-// the tag itself doesn't even parse (a distinct, worse problem, but not
-// this function's job to diagnose).
-func describeTag(raw []byte) string {
-	parsed, err := tag.Parse(string(raw))
-	if err != nil {
-		return "malformed tag"
-	}
-	return fmt.Sprintf("needs key version %d", parsed.Version)
+		strings.Join(lines, "\n"))
 }

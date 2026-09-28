@@ -1,4 +1,4 @@
-# Spec 07 — `strucrypt init`
+# Spec 07 — `nebel init`
 
 Bootstrap a new repo or join an existing one. See
 USER_INTERACTIONS.md § 1.
@@ -7,9 +7,9 @@ USER_INTERACTIONS.md § 1.
 
 ### Bootstrap mode (no committed config yet)
 
-- **AC-7.1**: running `init` with no `.strucrypt.yaml` present creates
-  `.strucrypt.yaml` (with a fresh salt and canary, spec 04) and a
-  `.gitattributes` entry wiring configured patterns to the strucrypt
+- **AC-7.1**: running `init` with no `.nebel.yaml` present creates
+  `.nebel.yaml` (with a fresh salt and canary, spec 04) and a
+  `.gitattributes` entry wiring configured patterns to the nebel
   filter.
 - **AC-7.2**: with no password argument, a strong random passphrase is
   generated and printed exactly once; it is not written to disk anywhere
@@ -19,10 +19,10 @@ USER_INTERACTIONS.md § 1.
 - **AC-7.4**: the generated/derived key correctly decrypts the config's
   own canary value immediately after bootstrap (self-consistency check).
 - **AC-7.5**: bootstrap registers the local git filter
-  (`git config --get filter.strucrypt.clean` / `.smudge` return the
+  (`git config --get filter.nebel.clean` / `.smudge` return the
   expected commands afterward).
 
-### Join mode (`.strucrypt.yaml` already exists)
+### Join mode (`.nebel.yaml` already exists)
 
 - **AC-7.6**: `init <correct-password>` verifies the password by
   decrypting the config's canary, then registers the local filter.
@@ -44,10 +44,10 @@ an argument leaks the shared password to every other user on the machine,
 and to shell history and CI log echoes.
 
 Sources are consulted in order of decreasing safety: `--password-stdin`,
-then `$STRUCRYPT_PASSWORD`, then an interactive prompt. There is no
+then `$NEBEL_PASSWORD`, then an interactive prompt. There is no
 command-line password argument.
 
-- **AC-7.10**: `$STRUCRYPT_PASSWORD` supplies the password with no TTY
+- **AC-7.10**: `$NEBEL_PASSWORD` supplies the password with no TTY
   interaction required — the supported CI path.
 - **AC-7.11**: `--password-stdin` reads the password from stdin, stripping
   a single trailing line ending, so it can be piped from a secret store.

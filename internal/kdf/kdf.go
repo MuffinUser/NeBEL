@@ -48,7 +48,7 @@ const (
 
 // hkdfInfo domain-separates this expansion from any other use of the same
 // Argon2id output. Changing it changes every derived key.
-const hkdfInfo = "strucrypt v1 aes-256-siv key"
+const hkdfInfo = "nebel v1 aes-256-siv key"
 
 var (
 	// ErrEmptyPassword is returned when Derive is given an empty password.

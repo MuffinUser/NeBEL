@@ -1,4 +1,4 @@
-# Spec 08 — `strucrypt add`
+# Spec 08 — `nebel add`
 
 Register a new file pattern and/or field in the committed config. See
 USER_INTERACTIONS.md § 2.
@@ -12,7 +12,7 @@ blobs with no readable structure, per-value for config you still want to
 diff. A bare `add <glob>` names neither and is refused with usage.
 
 - **AC-8.1**: `add file <glob>` creates a new `mode: file` rule for that
-  glob in `.strucrypt.yaml`, and wires the glob to the filter in
+  glob in `.nebel.yaml`, and wires the glob to the filter in
   `.gitattributes`.
 - **AC-8.2**: `add field <file> <path>...` with no existing rule for that
   file creates a `mode: value` rule with those paths in `encrypt`.
@@ -41,5 +41,5 @@ diff. A bare `add <glob>` names neither and is refused with usage.
   rules, their field order, and (as much as the YAML library allows)
   formatting/comments.
 - **AC-8.10**: after `add` succeeds, the new rule is immediately visible to
-  `strucrypt status` (spec 09) and to the git filter driver (spec 06) —
+  `nebel status` (spec 09) and to the git filter driver (spec 06) —
   no separate reload step needed.

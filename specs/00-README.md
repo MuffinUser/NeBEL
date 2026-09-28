@@ -1,4 +1,4 @@
-# strucrypt — Specs
+# nebel — Specs
 
 Each file is one implementable, testable unit, derived from
 `../REQUIREMENTS.md` and `../USER_INTERACTIONS.md`. Acceptance criteria
@@ -32,7 +32,7 @@ First implementation pass covers **whole-file encryption only**. Per-value
 1. `01-key-derivation.md` — password → AES-SIV key material
 2. `02-encryption-primitive.md` — AES-256-SIV encrypt/decrypt + AAD
 3. `03-value-encoding.md` — `ENC[...]` tag format
-4. `04-config-file.md` — `.strucrypt.yaml` rules parsing
+4. `04-config-file.md` — `.nebel.yaml` rules parsing
 5. `05-format-handlers.md` — YAML/JSON/.env/.properties path resolution + in-place edit
 6. `06-git-filter-driver.md` — clean/smudge, ties 1–5 together
 7. `07-cli-init.md` — bootstrap/join

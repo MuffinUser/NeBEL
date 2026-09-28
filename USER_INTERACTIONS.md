@@ -1,27 +1,27 @@
-# strucrypt — User Interactions
+# nebel — User Interactions
 
 Design principle: **minimal surface**. Day-to-day use should require zero
 commands — `git add`/`git commit`/`git checkout` just work via the filter
 driver. Only three explicit commands are needed: bootstrap/join a repo,
 register what to encrypt, and check status.
 
-## 1. `strucrypt init [password]`
+## 1. `nebel init [password]`
 
 One command, two modes, auto-detected by whether the repo already has a
-committed strucrypt config.
+committed nebel config.
 
-### Bootstrap mode — no `.strucrypt.yaml` in the repo yet
+### Bootstrap mode — no `.nebel.yaml` in the repo yet
 
-First person to introduce strucrypt to a repo:
+First person to introduce nebel to a repo:
 
 ```
-$ strucrypt init
+$ nebel init
 Generated password: correct-horse-battery-staple-9f3a
 ⚠ This password will not be shown again — store it in your password
   manager now and share it with your team out-of-band.
 
 Created:
-  .strucrypt.yaml   (encryption rules config — commit this)
+  .nebel.yaml   (encryption rules config — commit this)
   .gitattributes    (filter assignment — commit this)
 
 Local filter registered. You're ready to use git normally.
@@ -29,18 +29,18 @@ Local filter registered. You're ready to use git normally.
 
 - If no password is given, one is generated (strong random passphrase).
 - To supply your own instead, see § Password input below.
-- Writes the committed config (`.strucrypt.yaml`) with: the Argon2id salt
+- Writes the committed config (`.nebel.yaml`) with: the Argon2id salt
   (not secret), an empty/example rule set, and a **canary value** — a
   well-known constant string encrypted under the derived key
-  (`AAD = "strucrypt-canary"`). This lets future `init` runs verify a
+  (`AAD = "nebel-canary"`). This lets future `init` runs verify a
   password is correct before trusting it, without needing any real secret
   to test against.
-- Registers the local git filter (`git config filter.strucrypt.*`).
+- Registers the local git filter (`git config filter.nebel.*`).
 
-### Join mode — `.strucrypt.yaml` already exists (clone of an existing repo)
+### Join mode — `.nebel.yaml` already exists (clone of an existing repo)
 
 ```
-$ strucrypt init
+$ nebel init
 Password:
 Password verified.
 Local filter registered.
@@ -66,7 +66,7 @@ every other user on the machine, and to shell history and CI logs.
 Sources, in order of precedence:
 
 1. `--password-stdin` — read from stdin, for piping out of a secret store.
-2. `$STRUCRYPT_PASSWORD` — the recommended CI path.
+2. `$NEBEL_PASSWORD` — the recommended CI path.
 3. An interactive prompt with echo disabled, when join mode needs a
    password and nothing else supplied one.
 
@@ -79,16 +79,16 @@ Same command, non-interactive — export the password from the CI platform's
 own secret store and run this once, before any step that needs cleartext:
 
 ```
-STRUCRYPT_PASSWORD="$SECRET" strucrypt init
+NEBEL_PASSWORD="$SECRET" nebel init
 ```
 
 or pipe it in, without putting it in the environment either:
 
 ```
-get-secret strucrypt | strucrypt init --password-stdin
+get-secret nebel | nebel init --password-stdin
 ```
 
-## 2. `strucrypt add file` / `strucrypt add field`
+## 2. `nebel add file` / `nebel add field`
 
 Two subcommands, because they register two different kinds of rule.
 
@@ -97,7 +97,7 @@ Two subcommands, because they register two different kinds of rule.
 For blobs with no readable structure: certificates, keyrings, dumps.
 
 ```
-$ strucrypt add file "secrets/*.pem"
+$ nebel add file "secrets/*.pem"
 Added rule: secrets/*.pem (mode: file)
 ```
 
@@ -107,7 +107,7 @@ For config you still want to read and diff in git. Paths are dot notation
 with array indices; quote them, or the shell will eat the brackets.
 
 ```
-$ strucrypt add field config/staging.yaml database.password 'api.keys[0]'
+$ nebel add field config/staging.yaml database.password 'api.keys[0]'
 Added to rule config/staging.yaml (mode: value):
   database.password
   api.keys[0]
@@ -117,7 +117,7 @@ With no paths, the file's values are listed to choose from — so nobody has
 to hand-write dot notation for a deeply nested key:
 
 ```
-$ strucrypt add field config/staging.yaml
+$ nebel add field config/staging.yaml
 Values in config/staging.yaml:
 
    1) database.host                            "db.internal"
@@ -141,12 +141,12 @@ Added to rule config/staging.yaml (mode: value):
 - Both subcommands also add the pattern to `.gitattributes`. After that the
   normal `git add`/`git commit` flow picks the rule up — no further step.
 
-## 3. `strucrypt status`
+## 3. `nebel status`
 
 Read-only inspection / debugging. No secrets are printed.
 
 ```
-$ strucrypt status
+$ nebel status
 Local filter:     registered ✓
 Password:         verified ✓
 
@@ -178,9 +178,9 @@ config/new-service.yaml     (mode: value)
 
 | Command | Who runs it | When |
 |---|---|---|
-| `strucrypt init [password]` | Repo owner (bootstrap) / every other clone / CI | Once per person/machine, and once per repo |
-| `strucrypt add <glob> [--field <path>]` | Any dev | When a new secret file or field is introduced |
-| `strucrypt status` | Any dev / CI | Ad hoc debugging, or as a CI gate |
+| `nebel init [password]` | Repo owner (bootstrap) / every other clone / CI | Once per person/machine, and once per repo |
+| `nebel add <glob> [--field <path>]` | Any dev | When a new secret file or field is introduced |
+| `nebel status` | Any dev / CI | Ad hoc debugging, or as a CI gate |
 
 Everything else (encrypt on stage, decrypt on checkout) happens
 transparently through the git filter driver — no dedicated

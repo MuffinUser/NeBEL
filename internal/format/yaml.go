@@ -12,7 +12,7 @@ import (
 	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 
-	"github.com/MarwinMoellers/strucrypt/internal/tag"
+	"github.com/MarwinMoellers/nebel/internal/tag"
 )
 
 type yamlHandler struct{}

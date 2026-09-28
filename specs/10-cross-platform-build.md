@@ -11,7 +11,7 @@ See REQUIREMENTS.md § Cross-platform support.
 - **AC-10.2**: equivalent builds succeed for `darwin/amd64`,
   `darwin/arm64`, and `windows/amd64`.
 - **AC-10.3**: a smoke test runs on each target platform in CI: build the
-  binary, run `strucrypt init` + `add` + a round-trip `git add`/checkout
+  binary, run `nebel init` + `add` + a round-trip `git add`/checkout
   in a scratch repo, verify decrypted content matches the original.
 - **AC-10.4**: all cross-compiled binaries are produced from a single Go
   toolchain invocation per target (no per-platform build environment

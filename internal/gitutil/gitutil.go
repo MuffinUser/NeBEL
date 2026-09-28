@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Package gitutil shells out to the git binary for the handful of
-// operations strucrypt needs: locating the repository root and reading or
+// operations nebel needs: locating the repository root and reading or
 // writing local (not committed) git config.
 package gitutil
 
@@ -49,8 +49,8 @@ func ConfigSet(key, value string) error {
 	return nil
 }
 
-// CheckoutAll re-smudges every tracked file that the strucrypt filter
-// manages — used after `strucrypt init` registers the filter, so files
+// CheckoutAll re-smudges every tracked file that the nebel filter
+// manages — used after `nebel init` registers the filter, so files
 // smudged as ciphertext passthrough before init ran are replaced with
 // their decrypted content (spec 07 AC-7.8).
 //
@@ -84,7 +84,7 @@ func CheckoutAll(repoRoot string) (int, error) {
 }
 
 // filterManagedFiles returns the repo-relative paths of every tracked file
-// whose "filter" gitattribute is "strucrypt".
+// whose "filter" gitattribute is "nebel".
 func filterManagedFiles(repoRoot string) ([]string, error) {
 	lsCmd := exec.Command("git", "ls-files")
 	lsCmd.Dir = repoRoot
@@ -112,7 +112,7 @@ func filterManagedFiles(repoRoot string) ([]string, error) {
 		// case, which this simple split does not handle — acceptable for
 		// the MVP's file-selection use case.
 		path, rest, ok := strings.Cut(line, ": filter: ")
-		if !ok || rest == "unspecified" || rest != "strucrypt" {
+		if !ok || rest == "unspecified" || rest != "nebel" {
 			continue
 		}
 		managed = append(managed, path)

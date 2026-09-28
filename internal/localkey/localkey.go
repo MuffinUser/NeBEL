@@ -3,7 +3,7 @@
 
 // Package localkey stores the derived AES-256-SIV key in local (per-clone,
 // not committed) git config, so its presence or absence is exactly the
-// "has this machine run `strucrypt init`" signal the clean/smudge filter
+// "has this machine run `nebel init`" signal the clean/smudge filter
 // needs for no-key passthrough (spec 06 AC-6.6).
 //
 // The key sits in plaintext in .git/config on disk. That file is never
@@ -15,10 +15,10 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/MarwinMoellers/strucrypt/internal/gitutil"
+	"github.com/MarwinMoellers/nebel/internal/gitutil"
 )
 
-const configKey = "filter.strucrypt.key"
+const configKey = "filter.nebel.key"
 
 // Get returns the locally registered key. ok is false, with a nil error,
 // when no key is registered yet.

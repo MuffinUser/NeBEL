@@ -29,7 +29,7 @@ func main() {
 	case "smudge":
 		err = runSmudge(os.Args[2:])
 	case "version":
-		fmt.Println("strucrypt", version)
+		fmt.Println("nebel", version)
 		fmt.Println("Copyright (C) 2026 Marwin Moellers")
 		fmt.Println("License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>")
 		fmt.Println("This is free software: you are free to change and redistribute it.")
@@ -40,22 +40,22 @@ func main() {
 	}
 
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "strucrypt:", err)
+		fmt.Fprintln(os.Stderr, "nebel:", err)
 		os.Exit(1)
 	}
 }
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
-  strucrypt init [--password-stdin]
+  nebel init [--password-stdin]
                                  bootstrap or join a repo. The password is
-                                 read from $STRUCRYPT_PASSWORD, from stdin
+                                 read from $NEBEL_PASSWORD, from stdin
                                  with --password-stdin, or prompted for
-  strucrypt add file <glob>      encrypt whole files matching <glob>
-  strucrypt add field <file> [path...]
+  nebel add file <glob>      encrypt whole files matching <glob>
+  nebel add field <file> [path...]
                                  encrypt named values inside <file>;
                                  with no paths, choose them interactively
-  strucrypt clean <path>         (invoked by git) encrypt stdin to stdout
-  strucrypt smudge <path>        (invoked by git) decrypt stdin to stdout
-  strucrypt version              print the build version`)
+  nebel clean <path>         (invoked by git) encrypt stdin to stdout
+  nebel smudge <path>        (invoked by git) decrypt stdin to stdout
+  nebel version              print the build version`)
 }

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Marwin Moellers
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package config parses and writes the committed .strucrypt.yaml rules
+// Package config parses and writes the committed .nebel.yaml rules
 // file: the salt, canary, and file-selection rules every clone shares.
 package config
 
@@ -11,14 +11,14 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/MarwinMoellers/strucrypt/internal/format"
+	"github.com/MarwinMoellers/nebel/internal/format"
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/goccy/go-yaml"
 )
 
 // FileName is the name of the committed config file, resolved relative to
 // the repository root.
-const FileName = ".strucrypt.yaml"
+const FileName = ".nebel.yaml"
 
 // Mode is the encryption granularity a rule applies to matching files.
 type Mode string
@@ -50,7 +50,7 @@ type Rule struct {
 	Encrypt []string `yaml:"encrypt,omitempty"`
 }
 
-// Config is the parsed contents of .strucrypt.yaml.
+// Config is the parsed contents of .nebel.yaml.
 type Config struct {
 	// Salt is the Argon2id salt, base64-encoded. Not secret.
 	Salt string `yaml:"salt"`
@@ -153,7 +153,7 @@ func Load(path string) (*Config, error) {
 // MVP limitation: this marshals the whole struct fresh each time, so
 // hand-added comments in an existing file are not preserved across a Save
 // (spec 08 AC-8.6 wants full formatting preservation — deferred along with
-// the rest of `strucrypt add`'s comment-preserving edit).
+// the rest of `nebel add`'s comment-preserving edit).
 func (c *Config) Save(path string) error {
 	data, err := yaml.Marshal(c)
 	if err != nil {

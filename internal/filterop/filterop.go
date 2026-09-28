@@ -12,10 +12,10 @@ package filterop
 import (
 	"fmt"
 
-	"github.com/MarwinMoellers/strucrypt/internal/config"
-	"github.com/MarwinMoellers/strucrypt/internal/format"
-	"github.com/MarwinMoellers/strucrypt/internal/siv"
-	"github.com/MarwinMoellers/strucrypt/internal/tag"
+	"github.com/MarwinMoellers/nebel/internal/config"
+	"github.com/MarwinMoellers/nebel/internal/format"
+	"github.com/MarwinMoellers/nebel/internal/siv"
+	"github.com/MarwinMoellers/nebel/internal/tag"
 )
 
 // Clean encrypts input if filePath matches a mode: file rule; otherwise (no

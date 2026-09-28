@@ -1,4 +1,4 @@
-# Spec 09 — `strucrypt status`
+# Spec 09 — `nebel status`
 
 Read-only inspection and CI gate. See USER_INTERACTIONS.md § 3.
 

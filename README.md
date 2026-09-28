@@ -1,4 +1,4 @@
-# strucrypt
+# nebel
 
 Encrypt secrets in place so they can live safely in the git repo, with
 transparent local decryption. Encryption happens on `git add`, decryption on
@@ -20,21 +20,21 @@ The only thing written by a Human is this Foreword. So take it for what it is.
 ## Install
 
 One static binary, which **must be on your `PATH`** — git invokes it by name
-(`strucrypt clean %f`). Get the archive onto the machine however you like
-(from [Releases](https://github.com/MarwinMoellers/strucrypt/releases), a
+(`nebel clean %f`). Get the archive onto the machine however you like
+(from [Releases](https://github.com/MarwinMoellers/nebel/releases), a
 share, a USB stick); the steps below install from that local file and need
 no internet. Adjust the filename to your version.
 
 **Windows** (PowerShell), then open a new terminal:
 
 ```powershell
-$Zip  = "$HOME\Downloads\strucrypt_v0.3.0_windows_amd64.zip"
-$Dest = "$env:LOCALAPPDATA\Programs\strucrypt"
+$Zip  = "$HOME\Downloads\nebel_v0.3.0_windows_amd64.zip"
+$Dest = "$env:LOCALAPPDATA\Programs\nebel"
 
 Unblock-File $Zip     # clears the "downloaded from the internet" mark
-Expand-Archive $Zip -DestinationPath $env:TEMP\strucrypt-install -Force
+Expand-Archive $Zip -DestinationPath $env:TEMP\nebel-install -Force
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
-Copy-Item "$env:TEMP\strucrypt-install\*\strucrypt.exe" $Dest -Force
+Copy-Item "$env:TEMP\nebel-install\*\nebel.exe" $Dest -Force
 [Environment]::SetEnvironmentVariable('Path',
   [Environment]::GetEnvironmentVariable('Path', 'User') + ";$Dest", 'User')
 
@@ -50,35 +50,35 @@ project) — it keeps the PATH it had when it started.
 **macOS** (`amd64` instead of `arm64` on Intel):
 
 ```sh
-tar -xzf ~/Downloads/strucrypt_v0.3.0_darwin_arm64.tar.gz -C /tmp
-sudo mv /tmp/strucrypt_*_darwin_*/strucrypt /usr/local/bin/
-xattr -d com.apple.quarantine /usr/local/bin/strucrypt   # if Gatekeeper blocks it
+tar -xzf ~/Downloads/nebel_v0.3.0_darwin_arm64.tar.gz -C /tmp
+sudo mv /tmp/nebel_*_darwin_*/nebel /usr/local/bin/
+xattr -d com.apple.quarantine /usr/local/bin/nebel   # if Gatekeeper blocks it
 ```
 
-**From source**: `go build -o strucrypt ./cmd/strucrypt`, then move it onto
+**From source**: `go build -o nebel ./cmd/nebel`, then move it onto
 your `PATH`.
 
-Check with `strucrypt version`.
+Check with `nebel version`.
 
 ## Quick start
 
-Set up a repo (first person to introduce strucrypt):
+Set up a repo (first person to introduce nebel):
 
 ```sh
-strucrypt init                          # generates a password — store it now
-strucrypt add file "secrets/*.pem"      # encrypt whole files
-strucrypt add field config/app.yaml     # or pick values to encrypt, interactively
+nebel init                          # generates a password — store it now
+nebel add file "secrets/*.pem"      # encrypt whole files
+nebel add field config/app.yaml     # or pick values to encrypt, interactively
 git add . && git commit -m "encrypt secrets"
 ```
 
-`.strucrypt.yaml` and `.gitattributes` are committed and shared; the password
+`.nebel.yaml` and `.gitattributes` are committed and shared; the password
 is not — distribute it to your team out of band.
 
 Join an existing repo, after cloning — `init` prompts for the shared
 password:
 
 ```sh
-strucrypt init
+nebel init
 ```
 
 A password given as an argument is refused — it would be readable by other
@@ -86,8 +86,8 @@ users on the machine, via the process list. Non-interactively, use the
 environment or stdin instead:
 
 ```sh
-STRUCRYPT_PASSWORD="$SECRET" strucrypt init   # CI
-get-secret strucrypt | strucrypt init --password-stdin
+NEBEL_PASSWORD="$SECRET" nebel init   # CI
+get-secret nebel | nebel init --password-stdin
 ```
 
 A clone that never runs `init` still works normally — `clone`, `pull`,
@@ -100,38 +100,38 @@ in the repo is wired to the filter — almost always a `.gitattributes` that
 was never committed. Check with:
 
 ```sh
-git check-attr filter -- <path>   # should report "filter: strucrypt"
+git check-attr filter -- <path>   # should report "filter: nebel"
 ```
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `strucrypt init [--password-stdin]` | Bootstrap a repo, or join one with the shared password |
-| `strucrypt add file <glob>` | Encrypt whole files matching a glob |
-| `strucrypt add field <file> [path...]` | Encrypt named values inside a file; with no paths, pick them interactively |
-| `strucrypt version` | Print the build version |
+| `nebel init [--password-stdin]` | Bootstrap a repo, or join one with the shared password |
+| `nebel add file <glob>` | Encrypt whole files matching a glob |
+| `nebel add field <file> [path...]` | Encrypt named values inside a file; with no paths, pick them interactively |
+| `nebel version` | Print the build version |
 
-`strucrypt clean` and `strucrypt smudge` exist for git to call; you never run
+`nebel clean` and `nebel smudge` exist for git to call; you never run
 them yourself.
 
 ## Licence
 
-Copyright (C) 2026 Marwin Moellers. strucrypt is free software under the
+Copyright (C) 2026 Marwin Moellers. nebel is free software under the
 [GNU General Public License v3.0 or later](LICENSE); there is NO WARRANTY,
 to the extent permitted by law.
 
-**Using it at a company is unrestricted.** Running strucrypt on your repos,
+**Using it at a company is unrestricted.** Running nebel on your repos,
 in CI, or across an entire organisation triggers no obligation whatsoever —
 the GPL's conditions attach to *distributing* the program, not to using it.
-Encrypting your files with strucrypt says nothing about the licence of those
+Encrypting your files with nebel says nothing about the licence of those
 files or of the repository they live in; the tool and your data stay
 separate.
 
-Obligations begin only if you hand strucrypt itself to someone else:
+Obligations begin only if you hand nebel itself to someone else:
 redistribute it, modified or not, and you must pass on the source under the
 same licence. The corresponding source for every release is at
-<https://github.com/MarwinMoellers/strucrypt>.
+<https://github.com/MarwinMoellers/nebel>.
 
 Third-party code statically linked into the binary — Tink, `x/crypto`,
 `goccy/go-yaml`, and others, all under permissive licences — is credited in

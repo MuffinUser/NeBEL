@@ -82,15 +82,15 @@ func TestConfigGetSetRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok, err := ConfigGet("filter.strucrypt.key"); err != nil || ok {
+	if _, ok, err := ConfigGet("filter.nebel.key"); err != nil || ok {
 		t.Fatalf("ConfigGet() on unset key: ok=%v err=%v, want ok=false err=nil", ok, err)
 	}
 
-	if err := ConfigSet("filter.strucrypt.key", "abc123"); err != nil {
+	if err := ConfigSet("filter.nebel.key", "abc123"); err != nil {
 		t.Fatalf("ConfigSet: %v", err)
 	}
 
-	got, ok, err := ConfigGet("filter.strucrypt.key")
+	got, ok, err := ConfigGet("filter.nebel.key")
 	if err != nil || !ok {
 		t.Fatalf("ConfigGet() after set: ok=%v err=%v, want ok=true err=nil", ok, err)
 	}

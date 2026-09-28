@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/MarwinMoellers/strucrypt/internal/tag"
+	"github.com/MarwinMoellers/nebel/internal/tag"
 )
 
 func TestParsePath(t *testing.T) {
@@ -283,7 +283,7 @@ func TestForUnsupportedExtension(t *testing.T) {
 	}
 }
 
-// Leaves is what `strucrypt add field` offers to pick from, so it must
+// Leaves is what `nebel add field` offers to pick from, so it must
 // list every scalar — and only scalars — with a path that Locate accepts.
 func TestLeaves(t *testing.T) {
 	tests := []struct {

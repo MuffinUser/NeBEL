@@ -20,7 +20,7 @@ See REQUIREMENTS.md § Git integration, § Bootstrapping & no-key operation.
 - **AC-6.5 Exact reversal**: `smudge(clean(input)) == input` byte-for-byte
   when the correct key is registered, for both modes.
 - **AC-6.6 No-key passthrough**: when no local key is registered (no
-  `strucrypt init` has run), both `clean` and `smudge` pass input through
+  `nebel init` has run), both `clean` and `smudge` pass input through
   **unchanged** — no error, no partial processing, no non-zero exit that
   would abort the git operation.
 - **AC-6.7 Tolerant smudge**: `smudge` on a value that isn't a well-formed

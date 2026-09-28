@@ -1,4 +1,4 @@
-# strucrypt — Requirements
+# nebel — Requirements
 
 ## Purpose
 
@@ -59,16 +59,16 @@ with transparent local decryption for developers.
     key-selection rules, see above) — every clone gets the same filter
     assignments and rules automatically, no manual per-dev setup of rules.
   - **Local per clone, not checked in**: the actual git filter
-    registration (`git config filter.strucrypt.clean` /
-    `filter.strucrypt.smudge`), set up by running a one-time
-    `strucrypt init <password>` command locally with the shared key.
+    registration (`git config filter.nebel.clean` /
+    `filter.nebel.smudge`), set up by running a one-time
+    `nebel init <password>` command locally with the shared key.
 - **The repo must remain fully usable without the key**: `clone`, `pull`,
   `commit`, and `push` must all work for someone who has not run `init`.
   Without a local key, the filter must **pass content through unchanged**
   (stays encrypted) rather than erroring or aborting the git operation.
   Only someone who runs `init` with the password sees/works with decrypted
   content on disk.
-- CI/CD follows the same pattern: run `strucrypt init` non-interactively
+- CI/CD follows the same pattern: run `nebel init` non-interactively
   using the key injected from the CI secret store before any step that
   needs cleartext secrets.
 

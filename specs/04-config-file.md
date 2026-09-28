@@ -1,4 +1,4 @@
-# Spec 04 — Config file (`.strucrypt.yaml`)
+# Spec 04 — Config file (`.nebel.yaml`)
 
 The committed rules config: salt, canary, and file/field selection rules.
 See REQUIREMENTS.md § Value selection, § File selection, and
@@ -26,8 +26,8 @@ USER_INTERACTIONS.md § init / add.
 - **AC-4.6 Mode conflict rejected**: two rules with the identical `files`
   glob but different `mode` fail config loading with a clear error.
 - **AC-4.7 Hand-editable**: a config file written by hand (not only via
-  `strucrypt add`) that satisfies the schema loads correctly — the format
+  `nebel add`) that satisfies the schema loads correctly — the format
   is plain YAML, no tool-specific serialization quirks required.
 - **AC-4.8 Canary format**: the `canary` field is a valid Spec-03 `ENC[...]`
-  tag over a fixed, documented plaintext constant (e.g. `"strucrypt-ok"`)
-  with `AAD = "strucrypt-canary"`.
+  tag over a fixed, documented plaintext constant (e.g. `"nebel-ok"`)
+  with `AAD = "nebel-canary"`.

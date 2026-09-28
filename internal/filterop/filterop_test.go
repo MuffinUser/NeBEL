@@ -7,8 +7,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/MarwinMoellers/strucrypt/internal/config"
-	"github.com/MarwinMoellers/strucrypt/internal/tag"
+	"github.com/MarwinMoellers/nebel/internal/config"
+	"github.com/MarwinMoellers/nebel/internal/tag"
 )
 
 var testKey = bytes.Repeat([]byte{0x42}, 64)

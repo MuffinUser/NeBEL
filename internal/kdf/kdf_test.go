@@ -11,7 +11,7 @@ import (
 )
 
 // testSalt is a fixed, valid salt for tests that are not about salt handling.
-var testSalt = []byte("strucrypt-test-salt-0123456789ab")
+var testSalt = []byte("nebel-test-salt-0123456789ab")
 
 // AC-1.1: the same password and salt derive byte-identical key material.
 func TestDeriveIsDeterministic(t *testing.T) {
@@ -30,7 +30,7 @@ func TestDeriveIsDeterministic(t *testing.T) {
 
 // AC-1.2: the same password with different salts derives different key material.
 func TestDeriveDiffersBySalt(t *testing.T) {
-	otherSalt := []byte("strucrypt-test-salt-ba9876543210")
+	otherSalt := []byte("nebel-test-salt-ba9876543210")
 
 	first, err := Derive("correct horse battery staple", testSalt)
 	if err != nil {
@@ -139,8 +139,8 @@ func TestDeriveRejectsBadInput(t *testing.T) {
 // existing repository becomes undecryptable. This vector pins the whole
 // pipeline (Argon2id costs, HKDF info string, output length) across versions.
 func TestDeriveGoldenVector(t *testing.T) {
-	const want = "1a4a0135a348d509ea1e901d39708b53c095d26dfd16e0dff5590f54be6ce04d" +
-		"84bbbc73c8eb0140cc781f46b70a1992c754425f9053bab6846b10bcbaf3b47e"
+	const want = "b39b492077374b9d760309478d32fcb93c50733b2dd1f7e09f186ff222831ee0" +
+		"d90292a5b15f453739a1d8897ac199e8fa74302cc8dfb371eebfa923c5c1d918"
 
 	key, err := Derive("correct horse battery staple", testSalt)
 	if err != nil {

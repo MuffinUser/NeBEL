@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// runInitWith runs `strucrypt init ...` in dir, with extraEnv added to the
+// runInitWith runs `nebel init ...` in dir, with extraEnv added to the
 // environment and stdin as the process's standard input — the two password
 // paths that, unlike an argument, are not visible in the process list.
 func runInitWith(t *testing.T, dir, pathEnv string, extraEnv []string, stdin string, args ...string) (string, error) {
@@ -32,7 +32,7 @@ func setupEncryptedOrigin(t *testing.T, pathEnv, password string) (string, strin
 	if out, err := runInitWith(t, origin, pathEnv, []string{passwordEnv + "=" + password}, ""); err != nil {
 		t.Fatalf("bootstrap: %v\n%s", err, out)
 	}
-	runIn(t, origin, pathEnv, "strucrypt", "add", "file", "secrets/*.pem")
+	runIn(t, origin, pathEnv, "nebel", "add", "file", "secrets/*.pem")
 
 	if err := os.MkdirAll(filepath.Join(origin, "secrets"), 0o755); err != nil {
 		t.Fatal(err)
@@ -114,7 +114,7 @@ func TestInitRejectsPasswordArgument(t *testing.T) {
 	if !strings.Contains(out, "process list") {
 		t.Errorf("error does not explain the exposure:\n%s", out)
 	}
-	if _, err := runInExpectingError(t, clone, pathEnv, "git", "config", "--local", "--get", "filter.strucrypt.key"); err == nil {
+	if _, err := runInExpectingError(t, clone, pathEnv, "git", "config", "--local", "--get", "filter.nebel.key"); err == nil {
 		t.Error("a refused init registered a local key")
 	}
 }
@@ -138,7 +138,7 @@ func TestInitWithoutAnyPasswordSourceFails(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(clone, "secrets", "prod.pem")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runInExpectingError(t, clone, pathEnv, "git", "config", "--local", "--get", "filter.strucrypt.key"); err == nil {
+	if _, err := runInExpectingError(t, clone, pathEnv, "git", "config", "--local", "--get", "filter.nebel.key"); err == nil {
 		t.Error("a failed init registered a local key")
 	}
 }

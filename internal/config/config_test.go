@@ -5,7 +5,7 @@ package config
 
 import (
 	"errors"
-	"github.com/MarwinMoellers/strucrypt/internal/format"
+	"github.com/MarwinMoellers/nebel/internal/format"
 	"os"
 	"path/filepath"
 	"testing"
@@ -182,7 +182,7 @@ rules:
 // serialization) loads correctly.
 func TestLoadHandWrittenConfig(t *testing.T) {
 	path := writeTempConfig(t, `
-# A hand-written config, not produced by `+"`strucrypt add`"+`.
+# A hand-written config, not produced by `+"`nebel add`"+`.
 salt: "c3RydWNyeXB0LXRlc3Qtc2FsdC0xNg=="
 canary: "ENC[AES256_SIV,data:aGVsbG8=]"
 rules:

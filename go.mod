@@ -1,4 +1,4 @@
-module github.com/MarwinMoellers/strucrypt
+module github.com/MarwinMoellers/nebel
 
 go 1.27.1
 

@@ -1,6 +1,6 @@
 # Third-party notices
 
-strucrypt itself is licensed under the GNU General Public License v3.0
+nebel itself is licensed under the GNU General Public License v3.0
 or later (see `LICENSE`). The binary statically links the Go modules
 listed below; their licences are reproduced verbatim as those licences
 require. This file is generated — see `go.mod` for the authoritative

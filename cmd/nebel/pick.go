@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/MarwinMoellers/strucrypt/internal/format"
-	"github.com/MarwinMoellers/strucrypt/internal/tag"
+	"github.com/MarwinMoellers/nebel/internal/format"
+	"github.com/MarwinMoellers/nebel/internal/tag"
 )
 
 // previewWidth is where a displayed value is truncated. Values are shown
@@ -44,7 +44,7 @@ func pickFields(handler format.Handler, source []byte, target string, existing m
 	}
 
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return nil, fmt.Errorf("no terminal to choose on: pass the paths as arguments, e.g. strucrypt add field %s %s", target, choices[0].Path)
+		return nil, fmt.Errorf("no terminal to choose on: pass the paths as arguments, e.g. nebel add field %s %s", target, choices[0].Path)
 	}
 
 	fmt.Printf("Values in %s:\n\n", target)

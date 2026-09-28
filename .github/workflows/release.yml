@@ -44,7 +44,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: go test ./cmd/strucrypt/... -run TestEndToEndWholeFileHappyPath -v -timeout 120s
+      - run: go test ./cmd/nebel/... -run TestEndToEndWholeFileHappyPath -v -timeout 120s
 
   # spec 10 AC-10.1: the linux/amd64 build must have no dynamic dependency
   # beyond baseline glibc, and run correctly inside a minimal UBI
@@ -59,11 +59,11 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Build static linux/amd64 binary
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o strucrypt-linux-amd64 ./cmd/strucrypt
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o nebel-linux-amd64 ./cmd/nebel
       - name: Confirm no dynamic dependencies
         run: |
           set -euo pipefail
-          if file strucrypt-linux-amd64 | grep -qi "dynamically linked"; then
+          if file nebel-linux-amd64 | grep -qi "dynamically linked"; then
             echo "binary is dynamically linked, expected fully static (CGO_ENABLED=0)" >&2
             exit 1
           fi
@@ -71,7 +71,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/work" -w /work \
             registry.access.redhat.com/ubi9/ubi-minimal:latest \
-            ./strucrypt-linux-amd64 version
+            ./nebel-linux-amd64 version
 
   # spec 10 AC-10.1, AC-10.2, AC-10.4: every target below is a single `go
   # build` invocation on one runner — no per-platform build environment
@@ -96,13 +96,13 @@ jobs:
 
           build() {
             os="$1"; arch="$2"; ext="$3"
-            name="strucrypt_${version}_${os}_${arch}"
+            name="nebel_${version}_${os}_${arch}"
             outdir="dist/${name}"
             mkdir -p "$outdir"
             echo "building ${os}/${arch}"
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
               go build -trimpath -ldflags="-s -w -X main.version=${version}" \
-              -o "${outdir}/strucrypt${ext}" ./cmd/strucrypt
+              -o "${outdir}/nebel${ext}" ./cmd/nebel
             # GPLv3 sec. 4 and the dependencies' own terms require the
             # licence texts to travel with every distributed binary.
             cp LICENSE THIRD_PARTY_NOTICES.md README.md "$outdir/"
@@ -125,7 +125,7 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: strucrypt-release
+          name: nebel-release
           path: |
             dist/*.tar.gz
             dist/*.zip

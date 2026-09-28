@@ -8,8 +8,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/MarwinMoellers/strucrypt/internal/format"
-	"github.com/MarwinMoellers/strucrypt/internal/tag"
+	"github.com/MarwinMoellers/nebel/internal/format"
+	"github.com/MarwinMoellers/nebel/internal/tag"
 )
 
 var pickChoices = []format.Leaf{

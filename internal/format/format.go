@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/MarwinMoellers/strucrypt/internal/tag"
+	"github.com/MarwinMoellers/nebel/internal/tag"
 )
 
 var (
@@ -49,7 +49,7 @@ type Handler interface {
 	Locate(src []byte, path string) (Span, error)
 
 	// Leaves lists every scalar in the document, in source order, with
-	// the dot-path that selects it. It is what `strucrypt add field`
+	// the dot-path that selects it. It is what `nebel add field`
 	// offers to pick from, so a user never has to hand-write a path.
 	Leaves(src []byte) ([]Leaf, error)
 

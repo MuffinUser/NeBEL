@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/MarwinMoellers/strucrypt/internal/config"
-	"github.com/MarwinMoellers/strucrypt/internal/tag"
+	"github.com/MarwinMoellers/nebel/internal/config"
+	"github.com/MarwinMoellers/nebel/internal/tag"
 )
 
 const valueDoc = `# Staging configuration.

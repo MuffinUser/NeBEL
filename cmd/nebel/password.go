@@ -17,7 +17,7 @@ import (
 // from. Environment blocks are readable only by the process owner
 // (/proc/<pid>/environ is 0600), unlike a command line, so this is the
 // recommended non-interactive source.
-const passwordEnv = "STRUCRYPT_PASSWORD"
+const passwordEnv = "NEBEL_PASSWORD"
 
 // ErrPasswordArgument is returned when a password is passed as a
 // command-line argument. It is refused rather than accepted-with-a-warning:
@@ -28,9 +28,9 @@ const passwordEnv = "STRUCRYPT_PASSWORD"
 var ErrPasswordArgument = errors.New(`passwords are no longer accepted as command-line arguments:
   the argument is visible in the process list to every other user on this
   machine, and is recorded in shell history and CI logs. Use one of:
-    STRUCRYPT_PASSWORD="$SECRET" strucrypt init
-    get-secret | strucrypt init --password-stdin
-    strucrypt init                 (prompts)`)
+    NEBEL_PASSWORD="$SECRET" nebel init
+    get-secret | nebel init --password-stdin
+    nebel init                 (prompts)`)
 
 // passwordInput is the set of password sources named on the command line.
 type passwordInput struct {
@@ -40,7 +40,7 @@ type passwordInput struct {
 }
 
 // resolve returns the password to use, consulting sources in order of
-// decreasing safety: --password-stdin, then $STRUCRYPT_PASSWORD, then an
+// decreasing safety: --password-stdin, then $NEBEL_PASSWORD, then an
 // interactive no-echo prompt.
 //
 // required distinguishes the two init modes. Join mode needs a password and

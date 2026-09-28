@@ -40,7 +40,7 @@ func TestAddFieldEncryptsOnlyNamedValues(t *testing.T) {
 	pathEnv := pathEnvWithBin(t)
 	repo := setupValueRepo(t, pathEnv)
 
-	runIn(t, repo, pathEnv, "strucrypt", "add", "field", "config/staging.yaml", "database.password", "api.keys[0]")
+	runIn(t, repo, pathEnv, "nebel", "add", "field", "config/staging.yaml", "database.password", "api.keys[0]")
 	runIn(t, repo, pathEnv, "git", "add", ".")
 	runIn(t, repo, pathEnv, "git", "commit", "-q", "-m", "encrypt fields")
 
@@ -77,15 +77,15 @@ func TestAddFieldEncryptsOnlyNamedValues(t *testing.T) {
 func TestAddFieldIsIdempotent(t *testing.T) {
 	pathEnv := pathEnvWithBin(t)
 	repo := setupValueRepo(t, pathEnv)
-	configPath := filepath.Join(repo, ".strucrypt.yaml")
+	configPath := filepath.Join(repo, ".nebel.yaml")
 
-	runIn(t, repo, pathEnv, "strucrypt", "add", "field", "config/staging.yaml", "database.password")
+	runIn(t, repo, pathEnv, "nebel", "add", "field", "config/staging.yaml", "database.password")
 	first, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	out := runIn(t, repo, pathEnv, "strucrypt", "add", "field", "config/staging.yaml", "database.password")
+	out := runIn(t, repo, pathEnv, "nebel", "add", "field", "config/staging.yaml", "database.password")
 	second, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +104,7 @@ func TestAddFieldRejectsMissingPath(t *testing.T) {
 	pathEnv := pathEnvWithBin(t)
 	repo := setupValueRepo(t, pathEnv)
 
-	out, err := runInExpectingError(t, repo, pathEnv, "strucrypt", "add", "field", "config/staging.yaml", "database.nope")
+	out, err := runInExpectingError(t, repo, pathEnv, "nebel", "add", "field", "config/staging.yaml", "database.nope")
 	if err == nil {
 		t.Fatalf("add field with a missing path: want an error, got:\n%s", out)
 	}
@@ -112,7 +112,7 @@ func TestAddFieldRejectsMissingPath(t *testing.T) {
 		t.Errorf("error does not name the path:\n%s", out)
 	}
 
-	config, err := os.ReadFile(filepath.Join(repo, ".strucrypt.yaml"))
+	config, err := os.ReadFile(filepath.Join(repo, ".nebel.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,8 +127,8 @@ func TestAddFileAndFieldConflict(t *testing.T) {
 	pathEnv := pathEnvWithBin(t)
 	repo := setupValueRepo(t, pathEnv)
 
-	runIn(t, repo, pathEnv, "strucrypt", "add", "file", "config/staging.yaml")
-	out, err := runInExpectingError(t, repo, pathEnv, "strucrypt", "add", "field", "config/staging.yaml", "database.password")
+	runIn(t, repo, pathEnv, "nebel", "add", "file", "config/staging.yaml")
+	out, err := runInExpectingError(t, repo, pathEnv, "nebel", "add", "field", "config/staging.yaml", "database.password")
 	if err == nil {
 		t.Fatalf("add field over a mode: file rule: want an error, got:\n%s", out)
 	}
@@ -143,7 +143,7 @@ func TestAddFieldWithoutTerminalExplainsItself(t *testing.T) {
 	pathEnv := pathEnvWithBin(t)
 	repo := setupValueRepo(t, pathEnv)
 
-	out, err := runInExpectingError(t, repo, pathEnv, "strucrypt", "add", "field", "config/staging.yaml")
+	out, err := runInExpectingError(t, repo, pathEnv, "nebel", "add", "field", "config/staging.yaml")
 	if err == nil {
 		t.Fatalf("add field with no paths and no terminal: want an error, got:\n%s", out)
 	}
@@ -159,12 +159,12 @@ func TestAddRequiresSubcommand(t *testing.T) {
 	repo := setupValueRepo(t, pathEnv)
 
 	for _, args := range [][]string{{"add"}, {"add", "secrets/*.pem"}} {
-		out, err := runInExpectingError(t, repo, pathEnv, "strucrypt", args...)
+		out, err := runInExpectingError(t, repo, pathEnv, "nebel", args...)
 		if err == nil {
-			t.Errorf("strucrypt %v: want an error, got:\n%s", args, out)
+			t.Errorf("nebel %v: want an error, got:\n%s", args, out)
 		}
 		if !strings.Contains(out, "add file") || !strings.Contains(out, "add field") {
-			t.Errorf("strucrypt %v: usage does not list both subcommands:\n%s", args, out)
+			t.Errorf("nebel %v: usage does not list both subcommands:\n%s", args, out)
 		}
 	}
 }
@@ -177,10 +177,10 @@ func TestAddRequiresSubcommand(t *testing.T) {
 func TestJoinReportsWhenNothingIsFilterManaged(t *testing.T) {
 	pathEnv := pathEnvWithBin(t)
 	origin := setupValueRepo(t, pathEnv)
-	runIn(t, origin, pathEnv, "strucrypt", "add", "field", "config/staging.yaml", "database.password")
+	runIn(t, origin, pathEnv, "nebel", "add", "field", "config/staging.yaml", "database.password")
 
 	// Commit everything except .gitattributes.
-	runIn(t, origin, pathEnv, "git", "add", ".strucrypt.yaml", "config/staging.yaml")
+	runIn(t, origin, pathEnv, "git", "add", ".nebel.yaml", "config/staging.yaml")
 	runIn(t, origin, pathEnv, "git", "commit", "-q", "-m", "without .gitattributes")
 
 	cloneDir := t.TempDir()
@@ -204,7 +204,7 @@ func TestJoinReportsWhenNothingIsFilterManaged(t *testing.T) {
 func TestJoinReportsDecryptedCount(t *testing.T) {
 	pathEnv := pathEnvWithBin(t)
 	origin := setupValueRepo(t, pathEnv)
-	runIn(t, origin, pathEnv, "strucrypt", "add", "field", "config/staging.yaml", "database.password")
+	runIn(t, origin, pathEnv, "nebel", "add", "field", "config/staging.yaml", "database.password")
 	runIn(t, origin, pathEnv, "git", "add", ".")
 	runIn(t, origin, pathEnv, "git", "commit", "-q", "-m", "encrypt")
 

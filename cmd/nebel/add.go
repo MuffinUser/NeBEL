@@ -9,16 +9,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/MarwinMoellers/strucrypt/internal/config"
-	"github.com/MarwinMoellers/strucrypt/internal/format"
-	"github.com/MarwinMoellers/strucrypt/internal/gitutil"
+	"github.com/MarwinMoellers/nebel/internal/config"
+	"github.com/MarwinMoellers/nebel/internal/format"
+	"github.com/MarwinMoellers/nebel/internal/gitutil"
 )
 
 const gitattributesName = ".gitattributes"
 
 const addUsage = `usage:
-  strucrypt add file <glob>            encrypt whole files matching <glob>
-  strucrypt add field <file> [path...] encrypt named values inside <file>`
+  nebel add file <glob>            encrypt whole files matching <glob>
+  nebel add field <file> [path...] encrypt named values inside <file>`
 
 // runAdd dispatches the two kinds of rule (spec 08). They are separate
 // subcommands rather than one command with a flag because they produce
@@ -47,7 +47,7 @@ func openConfig() (root, configPath string, cfg *config.Config, err error) {
 	}
 	configPath = filepath.Join(root, config.FileName)
 	if !config.Exists(configPath) {
-		return "", "", nil, fmt.Errorf("no %s found — run `strucrypt init` first", config.FileName)
+		return "", "", nil, fmt.Errorf("no %s found — run `nebel init` first", config.FileName)
 	}
 	cfg, err = config.Load(configPath)
 	if err != nil {
@@ -56,10 +56,10 @@ func openConfig() (root, configPath string, cfg *config.Config, err error) {
 	return root, configPath, cfg, nil
 }
 
-// runAddFile implements `strucrypt add file <glob>` (AC-8.1).
+// runAddFile implements `nebel add file <glob>` (AC-8.1).
 func runAddFile(args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("usage: strucrypt add file <glob>")
+		return fmt.Errorf("usage: nebel add file <glob>")
 	}
 	glob := args[0]
 
@@ -91,7 +91,7 @@ func runAddFile(args []string) error {
 	return nil
 }
 
-// runAddField implements `strucrypt add field <file> [path...]` (AC-8.2).
+// runAddField implements `nebel add field <file> [path...]` (AC-8.2).
 //
 // The file argument doubles as the rule's pattern and as the document the
 // paths are checked against: a path that doesn't resolve is refused here,
@@ -101,7 +101,7 @@ func runAddFile(args []string) error {
 // selection, so nobody has to hand-write dot notation for a nested key.
 func runAddField(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: strucrypt add field <file> [path...]")
+		return fmt.Errorf("usage: nebel add field <file> [path...]")
 	}
 	target, paths := args[0], args[1:]
 
@@ -214,11 +214,11 @@ func ensureGitattributes(root string) error {
 	return os.WriteFile(path, nil, 0o644)
 }
 
-// addGitattributesPattern appends a "<glob> filter=strucrypt" line wiring
-// glob to the strucrypt filter, unless that exact line is already present.
+// addGitattributesPattern appends a "<glob> filter=nebel" line wiring
+// glob to the nebel filter, unless that exact line is already present.
 func addGitattributesPattern(root, glob string) error {
 	path := filepath.Join(root, gitattributesName)
-	line := fmt.Sprintf("%s filter=strucrypt", glob)
+	line := fmt.Sprintf("%s filter=nebel", glob)
 
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {

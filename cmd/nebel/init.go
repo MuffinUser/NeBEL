@@ -10,14 +10,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/MarwinMoellers/strucrypt/internal/config"
-	"github.com/MarwinMoellers/strucrypt/internal/gitutil"
-	"github.com/MarwinMoellers/strucrypt/internal/kdf"
-	"github.com/MarwinMoellers/strucrypt/internal/localkey"
+	"github.com/MarwinMoellers/nebel/internal/config"
+	"github.com/MarwinMoellers/nebel/internal/gitutil"
+	"github.com/MarwinMoellers/nebel/internal/kdf"
+	"github.com/MarwinMoellers/nebel/internal/localkey"
 )
 
-// runInit implements `strucrypt init [password]`, auto-detecting bootstrap
-// vs. join mode by whether .strucrypt.yaml already exists (spec 07).
+// runInit implements `nebel init [password]`, auto-detecting bootstrap
+// vs. join mode by whether .nebel.yaml already exists (spec 07).
 func runInit(args []string) error {
 	input, err := parseInitArgs(args)
 	if err != nil {
@@ -44,7 +44,7 @@ func runInit(args []string) error {
 	return bootstrapRepo(root, configPath, password)
 }
 
-const initUsage = "usage: strucrypt init [--password-stdin]"
+const initUsage = "usage: nebel init [--password-stdin]"
 
 func parseInitArgs(args []string) (passwordInput, error) {
 	var input passwordInput
@@ -115,7 +115,7 @@ func bootstrapRepo(root, configPath, password string) error {
 	fmt.Println("  .gitattributes    (filter assignment — commit this)")
 	fmt.Println()
 	fmt.Println("Local filter registered. You're ready to use git normally.")
-	fmt.Println("Run `strucrypt add <glob>` to register files to encrypt.")
+	fmt.Println("Run `nebel add <glob>` to register files to encrypt.")
 	return nil
 }
 
@@ -162,7 +162,7 @@ func joinRepo(root, configPath, password string) error {
 		// exactly like a successful join that decrypted nothing.
 		fmt.Printf("Done, but no filter-managed files were found.\n"+
 			"  Check that %s is committed and lists your patterns:\n"+
-			"    git check-attr filter -- <path>   should report \"filter: strucrypt\"\n",
+			"    git check-attr filter -- <path>   should report \"filter: nebel\"\n",
 			gitattributesName)
 		return nil
 	}
@@ -171,13 +171,13 @@ func joinRepo(root, configPath, password string) error {
 }
 
 func registerFilter() error {
-	if err := gitutil.ConfigSet("filter.strucrypt.clean", "strucrypt clean %f"); err != nil {
+	if err := gitutil.ConfigSet("filter.nebel.clean", "nebel clean %f"); err != nil {
 		return err
 	}
-	if err := gitutil.ConfigSet("filter.strucrypt.smudge", "strucrypt smudge %f"); err != nil {
+	if err := gitutil.ConfigSet("filter.nebel.smudge", "nebel smudge %f"); err != nil {
 		return err
 	}
-	return gitutil.ConfigSet("filter.strucrypt.required", "true")
+	return gitutil.ConfigSet("filter.nebel.required", "true")
 }
 
 // generatePassword returns a high-entropy, URL-safe random password.

@@ -22,7 +22,7 @@ func TestResolvePasswordPrecedence(t *testing.T) {
 	}{
 		{"environment", "from-env", passwordInput{}, "from-env"},
 		// An empty variable is treated as unset: exporting
-		// STRUCRYPT_PASSWORD="" in CI is a missing secret, not a password.
+		// NEBEL_PASSWORD="" in CI is a missing secret, not a password.
 		{"empty environment falls through to the prompt", "", passwordInput{}, ""},
 	}
 

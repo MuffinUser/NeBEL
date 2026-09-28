@@ -10,7 +10,7 @@ out=THIRD_PARTY_NOTICES.md
 {
   echo "# Third-party notices"
   echo
-  echo "strucrypt itself is licensed under the GNU General Public License v3.0"
+  echo "nebel itself is licensed under the GNU General Public License v3.0"
   echo "or later (see \`LICENSE\`). The binary statically links the Go modules"
   echo "listed below; their licences are reproduced verbatim as those licences"
   echo "require. This file is generated — see \`go.mod\` for the authoritative"

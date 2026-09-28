@@ -6,16 +6,16 @@ package config
 import (
 	"fmt"
 
-	"github.com/MarwinMoellers/strucrypt/internal/siv"
-	"github.com/MarwinMoellers/strucrypt/internal/tag"
+	"github.com/MarwinMoellers/nebel/internal/siv"
+	"github.com/MarwinMoellers/nebel/internal/tag"
 )
 
 // CanaryPlaintext and CanaryAAD are the fixed constants the canary is
 // encrypted over (spec 04 AC-4.8), so a candidate password can be verified
 // against the committed config without any real secret existing yet.
 const (
-	CanaryPlaintext = "strucrypt-ok"
-	CanaryAAD       = "strucrypt-canary"
+	CanaryPlaintext = "nebel-ok"
+	CanaryAAD       = "nebel-canary"
 )
 
 // NewCanary encrypts CanaryPlaintext under key, for storing as Config.Canary.

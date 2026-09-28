@@ -9,14 +9,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/MarwinMoellers/strucrypt/internal/config"
-	"github.com/MarwinMoellers/strucrypt/internal/kdf"
+	"github.com/MarwinMoellers/nebel/internal/config"
+	"github.com/MarwinMoellers/nebel/internal/kdf"
 )
 
 // The files under testdata/v1 are a frozen repository, captured from a real
-// `strucrypt init` + `strucrypt add` + `git commit` run: .strucrypt.yaml is
-// the committed config (salt and canary included), and each file under
-// secrets/ is the ENC[...] blob git stored, byte for byte.
+// `nebel init` + `nebel add` + `git commit` run: .nebel.yaml is the
+// committed config (salt and canary included), and each file under secrets/
+// is the ENC[...] blob git stored, byte for byte.
 //
 // They exist to catch the one class of bug no round-trip test can see: a
 // change that is self-consistent — encrypt and decrypt still agree with each
@@ -47,7 +47,7 @@ func goldenPlaintexts() map[string][]byte {
 }
 
 // loadGoldenRepo loads the frozen config and re-derives its key from the
-// fixed password, exactly as `strucrypt init` does on a fresh clone.
+// fixed password, exactly as `nebel init` does on a fresh clone.
 func loadGoldenRepo(t *testing.T) (*config.Config, []byte) {
 	t.Helper()
 

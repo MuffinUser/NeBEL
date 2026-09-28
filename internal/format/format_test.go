@@ -132,6 +132,82 @@ func TestLocate(t *testing.T) {
 	}
 }
 
+// The CRLF regression: go-yaml's own Line/Column tracking miscounts
+// against raw "\r\n" — a real-world case, not a hypothetical one, since
+// Windows checking out a repo with core.autocrlf on reintroduces "\r"
+// into the working tree that clean never put there. Locate must still
+// find the right bytes when the source uses CRLF throughout, covering
+// the same shapes TestLocate does: a field right after a commented line,
+// one right after a blank line, a nested field, and a sequence index.
+func TestLocateCRLF(t *testing.T) {
+	crlfYAML := strings.ReplaceAll(yamlDoc, "\n", "\r\n")
+	crlfJSON := strings.ReplaceAll(jsonDoc, "\n", "\r\n")
+
+	for _, tt := range []struct {
+		name      string
+		file      string
+		src       string
+		path      string
+		wantRaw   string
+		wantValue string
+		wantType  tag.Type
+	}{
+		{"yaml field after a commented line", "c.yaml", crlfYAML, "database.password", `"s3cr3t"`, "s3cr3t", tag.TypeStr},
+		{"yaml plain string", "c.yaml", crlfYAML, "database.host", "db.internal", "db.internal", tag.TypeStr},
+		{"yaml nested field", "c.yaml", crlfYAML, "database.port", "5432", "5432", tag.TypeInt},
+		{"yaml sequence index", "c.yaml", crlfYAML, "api.keys[1]", "beta", "beta", tag.TypeStr},
+		{"yaml field after a blank line", "c.yaml", crlfYAML, "api.token", "'single-quoted'", "single-quoted", tag.TypeStr},
+		{"json nested string", "c.json", crlfJSON, "database.password", `"s3cr3t"`, "s3cr3t", tag.TypeStr},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, err := For(tt.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			span, err := h.Locate([]byte(tt.src), tt.path)
+			if err != nil {
+				t.Fatalf("Locate(%q): %v", tt.path, err)
+			}
+			if got := tt.src[span.Start:span.End]; got != tt.wantRaw {
+				t.Errorf("span covers %q, want %q", got, tt.wantRaw)
+			}
+			if span.Value != tt.wantValue {
+				t.Errorf("Value = %q, want %q", span.Value, tt.wantValue)
+			}
+			if span.Type != tt.wantType {
+				t.Errorf("Type = %q, want %q", span.Type, tt.wantType)
+			}
+		})
+	}
+}
+
+// The edge case both lineOffset and crlfMap's end-of-buffer handling have
+// to get right: a field on the very last line, with no trailing newline
+// at all — in either line-ending style.
+func TestLocateLastLineNoTrailingNewline(t *testing.T) {
+	for _, tt := range []struct{ name, src string }{
+		{"LF", "database:\n  password: \"s3cr3t\""},
+		{"CRLF", "database:\r\n  password: \"s3cr3t\""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, err := For("c.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			span, err := h.Locate([]byte(tt.src), "database.password")
+			if err != nil {
+				t.Fatalf("Locate: %v", err)
+			}
+			if got := tt.src[span.Start:span.End]; got != `"s3cr3t"` {
+				t.Errorf("span covers %q, want %q", got, `"s3cr3t"`)
+			}
+			if span.End != len(tt.src) {
+				t.Errorf("End = %d, want end of source (%d)", span.End, len(tt.src))
+			}
+		})
+	}
+}
+
 // AC-5.1: replacing a value leaves every other byte of the file identical —
 // comments, key order, indentation, blank lines and unrelated values.
 func TestSpliceIsByteExact(t *testing.T) {

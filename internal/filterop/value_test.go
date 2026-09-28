@@ -140,6 +140,54 @@ func TestCleanValuesIsDeterministic(t *testing.T) {
 	}
 }
 
+// The CRLF regression (internal/format's yaml.go): a mode: value document
+// using CRLF line endings throughout — the state a Windows clone's
+// working tree is actually in, once core.autocrlf reintroduces "\r" that
+// clean never put there — round-trips through Clean/Smudge byte-exact,
+// same as the LF version, instead of Locate miscounting into the wrong
+// part of the file.
+func TestCleanValuesCRLFRoundTrips(t *testing.T) {
+	crlf := strings.ReplaceAll(valueDoc, "\n", "\r\n")
+	cfg := valueConfig("database.password")
+
+	cleaned, err := Clean(cfg, testKeyring, "config/staging.yaml", []byte(crlf))
+	if err != nil {
+		t.Fatalf("Clean: %v", err)
+	}
+	smudged, _, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned)
+	if err != nil {
+		t.Fatalf("Smudge: %v", err)
+	}
+	if string(smudged) != crlf {
+		t.Errorf("CRLF round trip changed the file:\n got  = %q\n want = %q", smudged, crlf)
+	}
+}
+
+// The property the graceful degrade on `git pull` (spec 06 AC-6.11)
+// actually depends on: a Windows clone re-cleaning a document git has
+// reintroduced CRLF into must reproduce the exact same ciphertext,
+// modulo line endings, as the LF version committed from Linux/macOS —
+// otherwise the working tree looks locally modified even though nothing
+// meaningful changed, which is exactly the "would be overwritten by
+// merge" failure this guards against.
+func TestCleanValuesCRLFMatchesLFAfterNormalizing(t *testing.T) {
+	crlf := strings.ReplaceAll(valueDoc, "\n", "\r\n")
+	cfg := valueConfig("database.password")
+
+	lfCleaned, err := Clean(cfg, testKeyring, "config/staging.yaml", []byte(valueDoc))
+	if err != nil {
+		t.Fatalf("Clean (LF): %v", err)
+	}
+	crlfCleaned, err := Clean(cfg, testKeyring, "config/staging.yaml", []byte(crlf))
+	if err != nil {
+		t.Fatalf("Clean (CRLF): %v", err)
+	}
+
+	if normalized := strings.ReplaceAll(string(crlfCleaned), "\r\n", "\n"); normalized != string(lfCleaned) {
+		t.Errorf("CRLF clean output, normalized, does not match the LF version:\n got  = %q\n want = %q", normalized, lfCleaned)
+	}
+}
+
 // AC-6.4: a field that is already tagged is left exactly as it is, rather
 // than encrypted a second time.
 func TestCleanValuesSkipsAlreadyEncrypted(t *testing.T) {

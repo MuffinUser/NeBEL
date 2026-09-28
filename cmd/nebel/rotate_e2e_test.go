@@ -630,6 +630,61 @@ func TestExistingCloneRecoversAfterRotateWithPlainPullValueMode(t *testing.T) {
 	}
 }
 
+// The same scenario as TestExistingCloneRecoversAfterRotateWithPlainPullValueMode,
+// with core.autocrlf forced on for both repos — simulating a real
+// Windows clone's default git config, where checkout reintroduces "\r"
+// into any text file clean never put it in. Windows-only smoke tests
+// only run a handful of names (see .github/workflows/release.yml), so
+// this locks the class of bug into the ordinary, always-run `go test
+// ./...` suite instead of relying solely on native Windows CI to catch
+// it: the actual bug (internal/format's yaml.go miscounting byte offsets
+// against raw "\r\n") isn't OS-specific, just triggered by CRLF content,
+// which core.autocrlf produces identically on any platform.
+func TestExistingCloneRecoversAfterRotateWithPlainPullValueModeAutoCRLF(t *testing.T) {
+	pathEnv := pathEnvWithBin(t)
+	origin := setupValueRepo(t, pathEnv)
+	runIn(t, origin, pathEnv, "git", "config", "core.autocrlf", "true")
+	runIn(t, origin, pathEnv, "nebel", "add", "field", "config/staging.yaml", "database.password")
+	runIn(t, origin, pathEnv, "git", "add", ".")
+	runIn(t, origin, pathEnv, "git", "commit", "-q", "-m", "encrypt database.password")
+
+	clone := cloneOf(t, pathEnv, origin)
+	runIn(t, clone, pathEnv, "git", "config", "core.autocrlf", "true")
+	initWithPassword(t, clone, pathEnv, "value-mode-password")
+
+	out, err := runRotateWith(t, origin, pathEnv, []string{passwordEnv + "=rotated-password"}, "")
+	if err != nil {
+		t.Fatalf("nebel rotate: %v\n%s", err, out)
+	}
+	runIn(t, origin, pathEnv, "git", "commit", "-q", "-am", "rotate encryption key")
+
+	// This is the exact command that failed in CI before the
+	// internal/format fix: git reported "Your local changes ... would be
+	// overwritten by merge" because Locate miscounted CRLF-laden content
+	// and corrupted config/staging.yaml on the clone's own join above.
+	pullOut := runIn(t, clone, pathEnv, "git", "pull")
+	if !strings.Contains(pullOut, "config/staging.yaml") || !strings.Contains(pullOut, "database.password") {
+		t.Errorf("pull did not warn about the field it left encrypted:\n%s", pullOut)
+	}
+	if !strings.Contains(pullOut, "Fast-forward") {
+		t.Errorf("pull did not fast-forward cleanly:\n%s", pullOut)
+	}
+	if status := strings.TrimSpace(runIn(t, clone, pathEnv, "git", "status", "--porcelain")); status != "" {
+		t.Errorf("pull left the working tree looking locally modified:\n%s", status)
+	}
+
+	out, err = runInitWith(t, clone, pathEnv, []string{passwordEnv + "=rotated-password"}, "")
+	if err != nil {
+		t.Fatalf("nebel init (new password): %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "1 file decrypted locally") {
+		t.Errorf("init did not report the field decrypted:\n%s", out)
+	}
+	if status := strings.TrimSpace(runIn(t, clone, pathEnv, "git", "status", "--porcelain")); status != "" {
+		t.Errorf("init left the working tree dirty:\n%s", status)
+	}
+}
+
 // AC-11.8: rotate's output never includes decrypted plaintext.
 func TestRotateOutputHasNoSecrets(t *testing.T) {
 	pathEnv := pathEnvWithBin(t)

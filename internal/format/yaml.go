@@ -19,13 +19,24 @@ type yamlHandler struct{}
 
 // Locate walks the YAML AST to the node at path and returns the byte span
 // its scalar occupies in the source, quotes included.
+//
+// go-yaml's own Line/Column tracking (which yamlSpan's byte-offset math
+// depends on) miscounts against raw "\r\n" — a real-world case, since
+// Windows checking out a repo with core.autocrlf on reintroduces "\r"
+// into the working tree that clean never put there. Parsing is done
+// against a CRLF-normalized copy instead, with a crlfMap translating the
+// resulting span back to real offsets in src, so Locate still splices
+// over the actual bytes on disk. When src has no "\r\n" at all, the map
+// is the identity and this is exactly the original behavior.
 func (yamlHandler) Locate(src []byte, path string) (Span, error) {
 	steps, err := ParsePath(path)
 	if err != nil {
 		return Span{}, err
 	}
 
-	file, err := parser.ParseBytes(src, parser.ParseComments)
+	m := newCRLFMap(src)
+
+	file, err := parser.ParseBytes(m.norm, parser.ParseComments)
 	if err != nil {
 		return Span{}, fmt.Errorf("format: parsing YAML: %w", err)
 	}
@@ -51,7 +62,72 @@ func (yamlHandler) Locate(src []byte, path string) (Span, error) {
 	if !ok {
 		return Span{}, fmt.Errorf("%w: %q is a %s", ErrNotScalar, path, node.Type())
 	}
-	return yamlSpan(src, scalar.GetToken(), path)
+	return yamlSpan(src, m, scalar.GetToken(), path)
+}
+
+// crlfMap translates byte offsets computed against a CRLF-normalized copy
+// of a source buffer (every "\r\n" replaced by "\n") back to offsets in
+// the original buffer.
+type crlfMap struct {
+	// norm is what the YAML parser actually sees: src unchanged if it had
+	// no "\r\n" at all, otherwise a copy with every one collapsed to "\n".
+	norm []byte
+	// orig[i] is the offset in src that norm[i] came from. Absent (nil)
+	// when norm == src, in which case every offset already matches as-is.
+	orig []int
+	// srcLen lets a normalized offset one past the last byte (a span
+	// ending at EOF) map to the true end of src, since orig has no entry
+	// there to look up.
+	srcLen int
+}
+
+func newCRLFMap(src []byte) crlfMap {
+	if !bytes.Contains(src, []byte("\r\n")) {
+		return crlfMap{norm: src}
+	}
+	norm := make([]byte, 0, len(src))
+	orig := make([]int, 0, len(src))
+	for i := 0; i < len(src); i++ {
+		if src[i] == '\r' && i+1 < len(src) && src[i+1] == '\n' {
+			continue
+		}
+		norm = append(norm, src[i])
+		orig = append(orig, i)
+	}
+	return crlfMap{norm: norm, orig: orig, srcLen: len(src)}
+}
+
+// toSrc translates an *inclusive* byte offset in m.norm — the first byte
+// of a span — to the corresponding offset in the original source.
+func (m crlfMap) toSrc(normOffset int) int {
+	if m.orig == nil {
+		return normOffset
+	}
+	if normOffset >= len(m.orig) {
+		return m.srcLen
+	}
+	return m.orig[normOffset]
+}
+
+// toSrcEnd translates an *exclusive* end offset in m.norm — one past the
+// last byte of a span — to the corresponding offset in the original
+// source. This is not simply toSrc(normOffset): that would give the
+// original position of whatever norm byte comes *next*, which, if a "\r"
+// was dropped right there, overshoots past it. Mapping the last actually
+// included byte (normOffset-1) and adding one keeps the span's original
+// end exactly where that byte ends, with any dropped "\r" immediately
+// after it correctly left out.
+func (m crlfMap) toSrcEnd(normOffset int) int {
+	if m.orig == nil {
+		return normOffset
+	}
+	if normOffset <= 0 {
+		return 0
+	}
+	if normOffset-1 >= len(m.orig) {
+		return m.srcLen
+	}
+	return m.orig[normOffset-1] + 1
 }
 
 // yamlSpan converts a scalar token into a source byte range.
@@ -61,27 +137,42 @@ func (yamlHandler) Locate(src []byte, path string) (Span, error) {
 // includes leading trivia for some token kinds and not others, so it
 // disagrees with the source by a byte or two depending on how the scalar
 // was written. Line and Column consistently point at the first character
-// of the value itself, quotes included.
+// of the value itself, quotes included — but they're computed against
+// m.norm (what the parser actually saw), so the resulting offsets are
+// translated through m before they mean anything in src.
 //
 // The computed span is verified against the token's own Origin text before
 // being returned. Splicing a tag over the wrong bytes would corrupt the
 // file and, for the clean filter, commit a mangled secret — so a span that
 // doesn't match what the lexer saw is an error, not something to paper
-// over.
-func yamlSpan(src []byte, tk *token.Token, path string) (Span, error) {
+// over. In CRLF mode the check is against literal with every "\n" grown
+// back into "\r\n": that's a no-op for the ordinary single-line-scalar
+// case (nothing to replace), and correctly accounts for a multi-line
+// block scalar's internal line breaks otherwise.
+func yamlSpan(src []byte, m crlfMap, tk *token.Token, path string) (Span, error) {
 	literal := scalarText(tk.Origin)
-	start := lineOffset(src, tk.Position.Line) + tk.Position.Column - 1
+	normStart := lineOffset(m.norm, tk.Position.Line) + tk.Position.Column - 1
+	normEnd := normStart + len(literal)
 
-	if start < 0 || start+len(literal) > len(src) {
+	if normStart < 0 || normEnd > len(m.norm) {
 		return Span{}, fmt.Errorf("format: %q: scalar at line %d column %d is outside the source", path, tk.Position.Line, tk.Position.Column)
 	}
-	if got := string(src[start : start+len(literal)]); got != literal {
+
+	start, end := m.toSrc(normStart), m.toSrcEnd(normEnd)
+	want := literal
+	if m.orig != nil {
+		want = strings.ReplaceAll(literal, "\n", "\r\n")
+	}
+	if start < 0 || end > len(src) || end < start {
+		return Span{}, fmt.Errorf("format: %q: scalar at line %d column %d is outside the source", path, tk.Position.Line, tk.Position.Column)
+	}
+	if got := string(src[start:end]); got != want {
 		return Span{}, fmt.Errorf("format: %q: located %q at line %d column %d but the lexer read %q", path, got, tk.Position.Line, tk.Position.Column, literal)
 	}
 
 	return Span{
 		Start: start,
-		End:   start + len(literal),
+		End:   end,
 		Value: tk.Value,
 		Type:  yamlType(tk),
 	}, nil

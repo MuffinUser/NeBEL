@@ -103,6 +103,9 @@ jobs:
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
               go build -trimpath -ldflags="-s -w -X main.version=${version}" \
               -o "${outdir}/strucrypt${ext}" ./cmd/strucrypt
+            # GPLv3 sec. 4 and the dependencies' own terms require the
+            # licence texts to travel with every distributed binary.
+            cp LICENSE THIRD_PARTY_NOTICES.md README.md "$outdir/"
             if [ "$os" = "windows" ]; then
               (cd dist && zip -rq "${name}.zip" "${name}")
             else

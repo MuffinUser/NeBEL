@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Marwin Moellers
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package filterop implements the clean/smudge transforms git's filter
 // driver invokes on stage and checkout, tying together specs 01-05.
 //

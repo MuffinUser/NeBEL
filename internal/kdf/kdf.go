@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Marwin Moellers
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package kdf derives AES-256-SIV key material from a human password and a
 // non-secret salt that is committed to the repository.
 package kdf

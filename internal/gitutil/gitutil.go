@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Marwin Moellers
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package gitutil shells out to the git binary for the handful of
 // operations strucrypt needs: locating the repository root and reading or
 // writing local (not committed) git config.

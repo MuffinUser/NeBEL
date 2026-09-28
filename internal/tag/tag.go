@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Marwin Moellers
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package tag encodes and decodes the inline ENC[...] marker used to store
 // an encrypted value in place.
 //

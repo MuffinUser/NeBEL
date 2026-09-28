@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Marwin Moellers
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package localkey stores the derived AES-256-SIV key in local (per-clone,
 // not committed) git config, so its presence or absence is exactly the
 // "has this machine run `strucrypt init`" signal the clean/smudge filter

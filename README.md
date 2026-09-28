@@ -114,3 +114,28 @@ git check-attr filter -- <path>   # should report "filter: strucrypt"
 
 `strucrypt clean` and `strucrypt smudge` exist for git to call; you never run
 them yourself.
+
+## Licence
+
+Copyright (C) 2026 Marwin Moellers. strucrypt is free software under the
+[GNU General Public License v3.0 or later](LICENSE); there is NO WARRANTY,
+to the extent permitted by law.
+
+**Using it at a company is unrestricted.** Running strucrypt on your repos,
+in CI, or across an entire organisation triggers no obligation whatsoever —
+the GPL's conditions attach to *distributing* the program, not to using it.
+Encrypting your files with strucrypt says nothing about the licence of those
+files or of the repository they live in; the tool and your data stay
+separate.
+
+Obligations begin only if you hand strucrypt itself to someone else:
+redistribute it, modified or not, and you must pass on the source under the
+same licence. The corresponding source for every release is at
+<https://github.com/MarwinMoellers/strucrypt>.
+
+Third-party code statically linked into the binary — Tink, `x/crypto`,
+`goccy/go-yaml`, and others, all under permissive licences — is credited in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), regenerated with
+`sh scripts/gen-notices.sh` whenever dependencies change.
+
+If the GPL does not suit your case, ask me about a commercial licence.

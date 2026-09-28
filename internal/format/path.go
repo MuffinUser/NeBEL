@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Marwin Moellers
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package format locates scalar values inside structured files so a single
 // value can be replaced in place, leaving every other byte untouched.
 //

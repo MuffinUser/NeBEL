@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Marwin Moellers
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package config parses and writes the committed .strucrypt.yaml rules
 // file: the salt, canary, and file-selection rules every clone shares.
 package config

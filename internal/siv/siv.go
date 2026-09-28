@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Marwin Moellers
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package siv provides deterministic authenticated encryption (AES-256-SIV,
 // RFC 5297) bound to the location the ciphertext is stored in.
 //

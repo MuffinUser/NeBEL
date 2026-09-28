@@ -12,7 +12,10 @@ See REQUIREMENTS.md § Cross-platform support.
   `darwin/arm64`, and `windows/amd64`.
 - **AC-10.3**: a smoke test runs on each target platform in CI: build the
   binary, run `nebel init` + `add` + a round-trip `git add`/checkout
-  in a scratch repo, verify decrypted content matches the original.
+  in a scratch repo, verify decrypted content matches the original —
+  plus, for spec 11 key rotation, that a fresh clone decrypts everything
+  with just the new password and that an existing clone's plain `git
+  pull` survives a rotation it hasn't caught up to yet.
 - **AC-10.4**: all cross-compiled binaries are produced from a single Go
   toolchain invocation per target (no per-platform build environment
   required), matching the "single machine, no toolchain setup" rationale

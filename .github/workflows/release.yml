@@ -31,6 +31,13 @@ jobs:
   # spec 10 AC-10.3: build the binary and run init + add + a round-trip
   # git add/checkout in a scratch repo, verifying decrypted content
   # matches the original — natively, on each target OS (not emulated).
+  # Also covers spec 11 key rotation natively per OS: a fresh clone
+  # decrypting everything with just the new password, and an existing
+  # clone's plain `git pull` surviving a rotation it hasn't caught up to
+  # yet (spec 06 AC-6.11's passthrough-with-warning) for both whole-file
+  # and per-value rules — this is where filter-invocation and line-ending
+  # differences between OSes have bitten before (see the git history
+  # around the Windows filter path and Git Bash PATH fixes).
   smoke:
     name: Smoke (${{ matrix.os }})
     needs: test
@@ -44,7 +51,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: go test ./cmd/nebel/... -run TestEndToEndWholeFileHappyPath -v -timeout 120s
+      - run: go test ./cmd/nebel/... -run 'TestEndToEndWholeFileHappyPath|TestFreshCloneAfterRotateDecryptsEverythingWithNewPasswordAlone|TestExistingCloneRecoversAfterRotateWithPlainPull' -v -timeout 120s
 
   # spec 10 AC-10.1: the linux/amd64 build must have no dynamic dependency
   # beyond baseline glibc, and run correctly inside a minimal UBI
@@ -91,7 +98,13 @@ jobs:
       - name: Cross-compile all targets
         run: |
           set -euo pipefail
+          # GITHUB_REF_NAME is a branch name for anything but a tag push
+          # (e.g. "feature/key-rotation" for a manual dispatch on that
+          # branch) — used verbatim below in file/directory names, a "/"
+          # in it would silently nest the built archive one level deeper
+          # than the checksum step's glob looks, leaving it "not found".
           version="${GITHUB_REF_NAME:-dev}"
+          version="${version//\//-}"
           mkdir -p dist
 
           build() {

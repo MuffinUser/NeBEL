@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/MarwinMoellers/nebel/internal/tag"
+	"github.com/MuffinUser/nebel/internal/tag"
 )
 
 var (

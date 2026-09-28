@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/MarwinMoellers/nebel/internal/format"
+	"github.com/MuffinUser/nebel/internal/format"
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/goccy/go-yaml"
 )

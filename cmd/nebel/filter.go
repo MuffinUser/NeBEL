@@ -9,10 +9,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/MarwinMoellers/nebel/internal/config"
-	"github.com/MarwinMoellers/nebel/internal/filterop"
-	"github.com/MarwinMoellers/nebel/internal/gitutil"
-	"github.com/MarwinMoellers/nebel/internal/localkey"
+	"github.com/MuffinUser/nebel/internal/config"
+	"github.com/MuffinUser/nebel/internal/filterop"
+	"github.com/MuffinUser/nebel/internal/gitutil"
+	"github.com/MuffinUser/nebel/internal/localkey"
 )
 
 func runClean(args []string) error {

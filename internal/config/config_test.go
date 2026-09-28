@@ -5,7 +5,7 @@ package config
 
 import (
 	"errors"
-	"github.com/MarwinMoellers/nebel/internal/format"
+	"github.com/MuffinUser/nebel/internal/format"
 	"os"
 	"path/filepath"
 	"testing"

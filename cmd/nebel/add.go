@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/MarwinMoellers/nebel/internal/config"
-	"github.com/MarwinMoellers/nebel/internal/format"
-	"github.com/MarwinMoellers/nebel/internal/gitutil"
+	"github.com/MuffinUser/nebel/internal/config"
+	"github.com/MuffinUser/nebel/internal/format"
+	"github.com/MuffinUser/nebel/internal/gitutil"
 )
 
 const gitattributesName = ".gitattributes"

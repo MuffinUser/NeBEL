@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/MarwinMoellers/nebel/internal/tag"
+	"github.com/MuffinUser/nebel/internal/tag"
 )
 
 type jsonHandler struct{}

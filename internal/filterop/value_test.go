@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/MarwinMoellers/nebel/internal/config"
-	"github.com/MarwinMoellers/nebel/internal/tag"
+	"github.com/MuffinUser/nebel/internal/config"
+	"github.com/MuffinUser/nebel/internal/tag"
 )
 
 const valueDoc = `# Staging configuration.

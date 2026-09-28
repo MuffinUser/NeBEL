@@ -8,8 +8,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/MarwinMoellers/nebel/internal/format"
-	"github.com/MarwinMoellers/nebel/internal/tag"
+	"github.com/MuffinUser/nebel/internal/format"
+	"github.com/MuffinUser/nebel/internal/tag"
 )
 
 var pickChoices = []format.Leaf{

@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/MarwinMoellers/nebel/internal/format"
-	"github.com/MarwinMoellers/nebel/internal/tag"
+	"github.com/MuffinUser/nebel/internal/format"
+	"github.com/MuffinUser/nebel/internal/tag"
 )
 
 // previewWidth is where a displayed value is truncated. Values are shown

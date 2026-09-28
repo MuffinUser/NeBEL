@@ -15,7 +15,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/MarwinMoellers/nebel/internal/gitutil"
+	"github.com/MuffinUser/nebel/internal/gitutil"
 )
 
 const configKey = "filter.nebel.key"

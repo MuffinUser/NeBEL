@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/MarwinMoellers/nebel/internal/config"
-	"github.com/MarwinMoellers/nebel/internal/kdf"
+	"github.com/MuffinUser/nebel/internal/config"
+	"github.com/MuffinUser/nebel/internal/kdf"
 )
 
 // The files under testdata/v1 are a frozen repository, captured from a real

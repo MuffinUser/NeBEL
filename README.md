@@ -21,7 +21,7 @@ The only thing written by a Human is this Foreword. So take it for what it is.
 
 One static binary, which **must be on your `PATH`** — git invokes it by name
 (`nebel clean %f`). Get the archive onto the machine however you like
-(from [Releases](https://github.com/MarwinMoellers/nebel/releases), a
+(from [Releases](https://github.com/MuffinUser/nebel/releases), a
 share, a USB stick); the steps below install from that local file and need
 no internet. Adjust the filename to your version.
 
@@ -131,7 +131,7 @@ separate.
 Obligations begin only if you hand nebel itself to someone else:
 redistribute it, modified or not, and you must pass on the source under the
 same licence. The corresponding source for every release is at
-<https://github.com/MarwinMoellers/nebel>.
+<https://github.com/MuffinUser/nebel>.
 
 Third-party code statically linked into the binary — Tink, `x/crypto`,
 `goccy/go-yaml`, and others, all under permissive licences — is credited in

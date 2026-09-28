@@ -1,4 +1,4 @@
-module github.com/MarwinMoellers/nebel
+module github.com/MuffinUser/nebel
 
 go 1.27.1
 

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/MarwinMoellers/nebel/internal/tag"
+	"github.com/MuffinUser/nebel/internal/tag"
 )
 
 func TestParsePath(t *testing.T) {

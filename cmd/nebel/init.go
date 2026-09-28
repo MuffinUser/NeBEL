@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/MarwinMoellers/nebel/internal/config"
-	"github.com/MarwinMoellers/nebel/internal/gitutil"
-	"github.com/MarwinMoellers/nebel/internal/kdf"
-	"github.com/MarwinMoellers/nebel/internal/localkey"
+	"github.com/MuffinUser/nebel/internal/config"
+	"github.com/MuffinUser/nebel/internal/gitutil"
+	"github.com/MuffinUser/nebel/internal/kdf"
+	"github.com/MuffinUser/nebel/internal/localkey"
 )
 
 // runInit implements `nebel init [password]`, auto-detecting bootstrap

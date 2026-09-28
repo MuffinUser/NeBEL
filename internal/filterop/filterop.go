@@ -12,10 +12,10 @@ package filterop
 import (
 	"fmt"
 
-	"github.com/MarwinMoellers/nebel/internal/config"
-	"github.com/MarwinMoellers/nebel/internal/format"
-	"github.com/MarwinMoellers/nebel/internal/siv"
-	"github.com/MarwinMoellers/nebel/internal/tag"
+	"github.com/MuffinUser/nebel/internal/config"
+	"github.com/MuffinUser/nebel/internal/format"
+	"github.com/MuffinUser/nebel/internal/siv"
+	"github.com/MuffinUser/nebel/internal/tag"
 )
 
 // Clean encrypts input if filePath matches a mode: file rule; otherwise (no

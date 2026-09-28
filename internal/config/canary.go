@@ -6,8 +6,8 @@ package config
 import (
 	"fmt"
 
-	"github.com/MarwinMoellers/nebel/internal/siv"
-	"github.com/MarwinMoellers/nebel/internal/tag"
+	"github.com/MuffinUser/nebel/internal/siv"
+	"github.com/MuffinUser/nebel/internal/tag"
 )
 
 // CanaryPlaintext and CanaryAAD are the fixed constants the canary is

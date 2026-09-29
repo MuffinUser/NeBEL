@@ -4,6 +4,7 @@
 package gitutil
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -274,5 +275,93 @@ func TestCheckoutAllIsolatesPerFileSmudgeFailures(t *testing.T) {
 	}
 	if string(bad) != "bad-plaintext\n" {
 		t.Errorf("bad.txt = %q, want the raw committed blob %q", bad, "bad-plaintext\n")
+	}
+}
+
+// registerCatFilter wires the nebel filter to a no-op "cat" for both
+// directions, enough for CheckoutAll's dirty-check to be exercised
+// without needing a real clean/smudge transform.
+func registerCatFilter(t *testing.T, dir string) {
+	t.Helper()
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("config", "filter.nebel.clean", "cat")
+	run("config", "filter.nebel.smudge", "cat")
+	run("config", "filter.nebel.required", "true")
+}
+
+// Regression test for the 2026-09-29 audit's P01: CheckoutAll's
+// os.Remove-then-checkout has no backup step, and `git checkout HEAD --`
+// restores from HEAD regardless of the index — so before this fix, a
+// repeated `nebel init` (which calls CheckoutAll) silently discarded any
+// local edit to a managed file, staged or not. Both must now be refused
+// outright, with the local edit left completely untouched.
+func TestCheckoutAllRefusesDirtyManagedFiles(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		stage bool
+	}{
+		{"unstaged edit", false},
+		{"staged edit", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := newTempRepo(t)
+			if err := os.WriteFile(filepath.Join(dir, ".gitattributes"), []byte("*.txt filter=nebel\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			writeAndCommit(t, dir, "secret.txt", "original\n")
+			registerCatFilter(t, dir)
+
+			const edited = "locally edited, not yet committed\n"
+			path := filepath.Join(dir, "secret.txt")
+			if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if tt.stage {
+				cmd := exec.Command("git", "add", "--", "secret.txt")
+				cmd.Dir = dir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git add: %v\n%s", err, out)
+				}
+			}
+
+			_, _, err := CheckoutAll(dir)
+			if !errors.Is(err, ErrDirtyManagedFiles) {
+				t.Fatalf("CheckoutAll() error = %v, want %v", err, ErrDirtyManagedFiles)
+			}
+
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("secret.txt was removed despite CheckoutAll refusing: %v", err)
+			}
+			if string(got) != edited {
+				t.Errorf("secret.txt = %q, want the local edit left untouched: %q", got, edited)
+			}
+		})
+	}
+}
+
+// The ordinary case CheckoutAll exists for — no local changes at all, as
+// right after `nebel init` on a fresh clone — must not be blocked by the
+// new dirty check.
+func TestCheckoutAllSucceedsWhenNothingIsDirty(t *testing.T) {
+	dir := newTempRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, ".gitattributes"), []byte("*.txt filter=nebel\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeAndCommit(t, dir, "secret.txt", "original\n")
+	registerCatFilter(t, dir)
+
+	decrypted, failures, err := CheckoutAll(dir)
+	if err != nil {
+		t.Fatalf("CheckoutAll: %v", err)
+	}
+	if decrypted != 1 || len(failures) != 0 {
+		t.Errorf("CheckoutAll() = decrypted=%d failures=%v, want decrypted=1, no failures", decrypted, failures)
 	}
 }

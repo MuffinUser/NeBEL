@@ -114,7 +114,7 @@ func TestInitRejectsPasswordArgument(t *testing.T) {
 	if !strings.Contains(out, "process list") {
 		t.Errorf("error does not explain the exposure:\n%s", out)
 	}
-	if _, err := runInExpectingError(t, clone, pathEnv, "git", "config", "--local", "--get", "filter.nebel.key"); err == nil {
+	if _, ok := registeredKeyValue(t, clone, pathEnv, 1); ok {
 		t.Error("a refused init registered a local key")
 	}
 }
@@ -138,7 +138,7 @@ func TestInitWithoutAnyPasswordSourceFails(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(clone, "secrets", "prod.pem")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runInExpectingError(t, clone, pathEnv, "git", "config", "--local", "--get", "filter.nebel.key"); err == nil {
+	if _, ok := registeredKeyValue(t, clone, pathEnv, 1); ok {
 		t.Error("a failed init registered a local key")
 	}
 }

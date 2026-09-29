@@ -176,19 +176,19 @@ func TestRotateKeepsOldKeyRegistered(t *testing.T) {
 	pathEnv := pathEnvWithBin(t)
 	origin, plaintext := setupEncryptedOrigin(t, pathEnv, "origin-password")
 
-	keyV1Before := runIn(t, origin, pathEnv, "git", "config", "--local", "--get", "filter.nebel.key")
+	keyV1Before, _ := registeredKeyValue(t, origin, pathEnv, 1)
 
 	out, err := runRotateWith(t, origin, pathEnv, []string{passwordEnv + "=rotated-password"}, "")
 	if err != nil {
 		t.Fatalf("nebel rotate: %v\n%s", err, out)
 	}
 
-	keyV1After := runIn(t, origin, pathEnv, "git", "config", "--local", "--get", "filter.nebel.key")
+	keyV1After, _ := registeredKeyValue(t, origin, pathEnv, 1)
 	if keyV1Before != keyV1After {
 		t.Error("rotate disturbed the existing version's registered key")
 	}
-	if _, err := runInExpectingError(t, origin, pathEnv, "git", "config", "--local", "--get", "filter.nebel.key2"); err != nil {
-		t.Errorf("rotate did not register the new version's key: %v", err)
+	if _, ok := registeredKeyValue(t, origin, pathEnv, 2); !ok {
+		t.Error("rotate did not register the new version's key")
 	}
 
 	// The pre-rotation content, still tagged version 1, must still decrypt.

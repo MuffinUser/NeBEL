@@ -87,19 +87,55 @@ func Add(repoRoot string, paths ...string) error {
 	return nil
 }
 
-// RenormalizeAll force-reencrypts every nebel-managed file/field under the
-// config's *current* key version, regardless of what version each
-// previously carried, and stages the result — the `git add --renormalize`
-// escape hatch (spec 11 AC-11.10), run automatically by `nebel rotate` so
-// existing content doesn't need a manual follow-up to actually move onto
-// the version rotate just minted.
+// indexBlobs maps each of paths to its current staged blob hash, via
+// `git ls-files -s -z`. A path with nothing tracked at it is simply
+// absent from the result rather than being an error.
+//
+// The -z form is not cosmetic: git's default output quotes any path
+// containing a non-ASCII byte (core.quotePath) as a C-style escaped
+// string — "secrets/zug\303\244nge.pem" for an actual "ü" — which would
+// never match the same path as returned by cfg.MatchRule, silently
+// dropping that file from renormalize's scope.
+func indexBlobs(repoRoot string, paths []string) (map[string]string, error) {
+	blobs := map[string]string{}
+	if len(paths) == 0 {
+		return blobs, nil
+	}
+	args := append([]string{"ls-files", "-s", "-z", "--"}, paths...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gitutil: git ls-files -s: %w", wrapExitErr(err))
+	}
+	for _, record := range strings.Split(strings.TrimRight(string(out), "\x00"), "\x00") {
+		if record == "" {
+			continue
+		}
+		meta, path, ok := strings.Cut(record, "\t")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(meta)
+		if len(fields) < 2 {
+			continue
+		}
+		blobs[path] = fields[1] // "<mode> <sha> <stage>"
+	}
+	return blobs, nil
+}
+
+// renormalize force-reencrypts files under the config's *current* key
+// version, regardless of what version each previously carried, and
+// stages the result — the `git add --renormalize` escape hatch (spec 11
+// AC-11.10).
 //
 // This only ever needs the *current* version's key: clean always encrypts
-// under it regardless of a file's prior tag (spec 06 AC-6.12), and rotate
-// has just derived and registered that key locally before calling this —
-// so, unlike CheckoutAll's smudge (which needs whichever version's key a
+// under it regardless of a file's prior tag (spec 06 AC-6.12) — so,
+// unlike CheckoutAll's smudge (which needs whichever version's key a
 // value's own tag names), the `git add --renormalize` call itself is
-// expected to always succeed.
+// expected to always succeed as long as the caller already holds that
+// key locally.
 //
 // It can still be a no-op for a given path even so: a mode: value field,
 // or a mode: file whole file, that's still sitting as ciphertext
@@ -107,15 +143,20 @@ func Add(repoRoot string, paths ...string) error {
 // first place (e.g. it names a version this clone hasn't fetched via
 // `nebel init --version N`) looks the same to clean as any other
 // already-encrypted value (AC-6.4) and is left untouched. The returned
-// slice reflects only the paths that actually ended up staged with new
-// content, so a caller reporting "N re-encrypted" doesn't overcount those.
-func RenormalizeAll(repoRoot string) ([]string, error) {
-	files, err := ManagedFiles(repoRoot)
-	if err != nil {
-		return nil, err
-	}
+// slice reflects only the paths whose staged blob hash actually changed,
+// compared before and after — not every path passed in, and not every
+// path that already differed from HEAD for some unrelated reason (which
+// diffing the result against HEAD, instead, would wrongly count as this
+// call's doing) — so a caller reporting "N re-encrypted" doesn't
+// overcount either way.
+func renormalize(repoRoot string, files []string) ([]string, error) {
 	if len(files) == 0 {
 		return nil, nil
+	}
+
+	before, err := indexBlobs(repoRoot, files)
+	if err != nil {
+		return nil, err
 	}
 
 	args := append([]string{"add", "--renormalize", "--"}, files...)
@@ -125,18 +166,39 @@ func RenormalizeAll(repoRoot string) ([]string, error) {
 		return nil, fmt.Errorf("gitutil: git add --renormalize: %w: %s", wrapExitErr(err), strings.TrimSpace(string(out)))
 	}
 
-	diffArgs := append([]string{"diff", "--cached", "--name-only", "--"}, files...)
-	diffCmd := exec.Command("git", diffArgs...)
-	diffCmd.Dir = repoRoot
-	out, err := diffCmd.Output()
+	after, err := indexBlobs(repoRoot, files)
 	if err != nil {
-		return nil, fmt.Errorf("gitutil: git diff --cached: %w", wrapExitErr(err))
+		return nil, err
 	}
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" {
-		return nil, nil
+
+	var changed []string
+	for _, f := range files {
+		if before[f] != after[f] {
+			changed = append(changed, f)
+		}
 	}
-	return strings.Split(trimmed, "\n"), nil
+	return changed, nil
+}
+
+// RenormalizeAll runs renormalize over every nebel-managed file/field in
+// the repository — run automatically by `nebel rotate` so existing
+// content doesn't need a manual follow-up to actually move onto the
+// version rotate just minted.
+func RenormalizeAll(repoRoot string) ([]string, error) {
+	files, err := ManagedFiles(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	return renormalize(repoRoot, files)
+}
+
+// Renormalize runs renormalize over a caller-chosen subset of
+// already-tracked, repo-relative paths — used by `nebel add` to bring
+// files that already existed, unchanged, under a rule just registered
+// for them, without touching every other nebel-managed file in the repo
+// the way RenormalizeAll does.
+func Renormalize(repoRoot string, files []string) ([]string, error) {
+	return renormalize(repoRoot, files)
 }
 
 // Show returns path's content as committed at commit (e.g. "HEAD" or a
@@ -259,17 +321,37 @@ func CheckoutAll(repoRoot string) (decrypted int, failures []CheckoutFailure, er
 	return decrypted, failures, nil
 }
 
-// ManagedFiles returns the repo-relative paths of every tracked file
-// whose "filter" gitattribute is "nebel".
-func ManagedFiles(repoRoot string) ([]string, error) {
-	lsCmd := exec.Command("git", "ls-files")
+// TrackedFiles returns the repo-relative paths of every file `git
+// ls-files` reports for repoRoot — every file git currently tracks,
+// regardless of any nebel rule.
+//
+// -z, not plain `ls-files`: git's default output quotes any path
+// containing a non-ASCII byte (core.quotePath) as a C-style escaped
+// string, which would never match the same path as returned by
+// cfg.MatchRule — silently dropping that file from every caller that
+// filters this list by rule, notably `nebel add`'s renormalize step.
+func TrackedFiles(repoRoot string) ([]string, error) {
+	lsCmd := exec.Command("git", "ls-files", "-z")
 	lsCmd.Dir = repoRoot
 	lsOut, err := lsCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("gitutil: git ls-files: %w", wrapExitErr(err))
 	}
-	tracked := strings.Split(strings.TrimSpace(string(lsOut)), "\n")
+	tracked := strings.Split(strings.TrimRight(string(lsOut), "\x00"), "\x00")
 	if len(tracked) == 1 && tracked[0] == "" {
+		return nil, nil
+	}
+	return tracked, nil
+}
+
+// ManagedFiles returns the repo-relative paths of every tracked file
+// whose "filter" gitattribute is "nebel".
+func ManagedFiles(repoRoot string) ([]string, error) {
+	tracked, err := TrackedFiles(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	if len(tracked) == 0 {
 		return nil, nil
 	}
 

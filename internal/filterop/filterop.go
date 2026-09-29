@@ -12,6 +12,7 @@ package filterop
 import (
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/MuffinUser/nebel/internal/config"
 	"github.com/MuffinUser/nebel/internal/format"
@@ -262,10 +263,51 @@ func smudgeValues(rule config.Rule, keyring Keyring, filePath string, input []by
 		if err != nil {
 			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, err)
 		}
+		// Stopgap for a legacy tag's still-unauthenticated type field
+		// (parsed.TypeBound == false, see the AAD selection above): a type
+		// flip there needs no key, and Render writes TypeInt/TypeFloat/
+		// TypeBool out unquoted with no validation of its own. Refusing a
+		// plaintext that isn't a valid literal for its claimed type won't
+		// catch every flip (e.g. a string that happens to read "false"
+		// stays ambiguous either way — see
+		// TestSmudgeValuesLegacyTagTypeStillUnauthenticated), but it keeps
+		// a successful flip from unquoting arbitrary attacker-controlled
+		// text, which for a crafted value could otherwise inject
+		// structure into the surrounding document. A type-bound tag can't
+		// reach this in practice (its type can't change without failing
+		// the Decrypt above), so this never rejects legitimate content.
+		if err := validTypeLiteral(string(plaintext), parsed.Type); err != nil {
+			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, err)
+		}
 		edits = append(edits, format.Edit{Span: span, Text: handler.Render(string(plaintext), parsed.Type)})
 	}
 	out, err := splice(input, edits, "smudge", filePath)
 	return out, skipped, err
+}
+
+// ErrInvalidTypeLiteral is returned when a decrypted value isn't a
+// syntactically valid literal for its tag's claimed non-string type — see
+// validTypeLiteral.
+var ErrInvalidTypeLiteral = errors.New("filterop: decrypted value is not a valid literal for its claimed type")
+
+// validTypeLiteral rejects a plaintext that doesn't look like a genuine
+// int/float/bool literal before it gets rendered unquoted. TypeStr always
+// passes: Render quotes it, so whatever bytes it contains stay inert data
+// rather than becoming unquoted source syntax.
+func validTypeLiteral(value string, t tag.Type) error {
+	var err error
+	switch t {
+	case tag.TypeBool:
+		_, err = strconv.ParseBool(value)
+	case tag.TypeInt:
+		_, err = strconv.ParseInt(value, 10, 64)
+	case tag.TypeFloat:
+		_, err = strconv.ParseFloat(value, 64)
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %q is not a valid %s", ErrInvalidTypeLiteral, value, t)
+	}
+	return nil
 }
 
 func splice(input []byte, edits []format.Edit, op, filePath string) ([]byte, error) {

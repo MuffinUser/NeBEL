@@ -56,4 +56,13 @@ authenticated the same way.
   A value tag from before this fix (`ALGO` = `AES256_SIV`) has no `type`
   binding and keeps decrypting exactly as it always did — there is no
   in-tool migration for already-committed tags; a value converges onto
-  the bound form the next time anything re-encrypts it.
+  the bound form the next time anything re-encrypts it. That
+  convergence only protects the current, committed tag: an attacker
+  with write access can still resurrect an old `AES256_SIV` blob from
+  git history (or a stale branch or clone) with its `type` re-flipped,
+  and it authenticates exactly as it did when first committed, since
+  its key version stays registered indefinitely (spec 11 AC-11.5).
+  Closing that fully would mean actively revoking the old key version,
+  which rotation does not do. `internal/filterop`'s `validTypeLiteral`
+  narrows what a successful flip against a legacy tag can render to a
+  genuine literal of the new type, but does not authenticate it.

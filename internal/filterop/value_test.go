@@ -385,7 +385,13 @@ func TestSmudgeValuesAcceptsLegacyPreTypeBoundTag(t *testing.T) {
 // would break every such tag already committed before this fix. A legacy
 // value converges onto the safer, type-bound form the next time anything
 // re-encrypts it (an ordinary edit, `nebel rotate`, or `git add
-// --renormalize`) — see the tag package's doc comment.
+// --renormalize`) — see the tag package's doc comment. What remains is
+// narrower than the original P05 finding, though, not the same gap:
+// validTypeLiteral (see TestSmudgeValuesRejectsNonLiteralAfterLegacyTypeFlip)
+// refuses a plaintext that isn't a genuine literal for the type it's been
+// flipped to, so a flip only "succeeds" — as here — when the underlying
+// plaintext happens to also be a valid literal of the new type, same as
+// the string "false" is also a valid bool literal.
 func TestSmudgeValuesLegacyTagTypeStillUnauthenticated(t *testing.T) {
 	const legacyValue = "false"
 	legacyAAD := siv.AAD(siv.ModeValue, "config/staging.yaml", "database.password")
@@ -403,5 +409,28 @@ func TestSmudgeValuesLegacyTagTypeStillUnauthenticated(t *testing.T) {
 	}
 	if !bytes.Contains(got, []byte("password: "+legacyValue)) {
 		t.Errorf("Smudge() = %q, want the unquoted rendering %q the type-flip produces", got, "password: "+legacyValue)
+	}
+}
+
+// The stopgap validTypeLiteral adds: a legacy tag's type field still
+// isn't authenticated (see TestSmudgeValuesLegacyTagTypeStillUnauthenticated),
+// but flipping type:str to type:bool on a plaintext that isn't itself a
+// valid bool literal — ordinary secret text, not crafted to also read as
+// one — must now be refused rather than rendered unquoted. Unquoted
+// arbitrary text is exactly how a crafted plaintext could inject
+// structure into the surrounding document.
+func TestSmudgeValuesRejectsNonLiteralAfterLegacyTypeFlip(t *testing.T) {
+	const legacyValue = "s3cr3t"
+	legacyAAD := siv.AAD(siv.ModeValue, "config/staging.yaml", "database.password")
+	ciphertext, err := siv.Encrypt(testKey, []byte(legacyValue), legacyAAD)
+	if err != nil {
+		t.Fatalf("siv.Encrypt: %v", err)
+	}
+	legacyTag := fmt.Sprintf("ENC[%s,key:1,data:%s,type:str]", tag.AlgoAES256SIV, base64.StdEncoding.EncodeToString(ciphertext))
+	tamperedTag := strings.Replace(legacyTag, ",type:str]", ",type:bool]", 1)
+
+	doc := strings.Replace(valueDoc, `password: "s3cr3t"`, `password: "`+tamperedTag+`"`, 1)
+	if _, _, err := Smudge(valueConfig(), testKeyring, "config/staging.yaml", []byte(doc)); !errors.Is(err, ErrInvalidTypeLiteral) {
+		t.Errorf("Smudge() error = %v, want %v", err, ErrInvalidTypeLiteral)
 	}
 }

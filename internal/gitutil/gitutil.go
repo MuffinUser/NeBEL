@@ -191,6 +191,18 @@ func IsShallow(repoRoot string) (bool, error) {
 // overwrites the working tree from HEAD regardless of the index or of any
 // unstaged edit, and CheckoutAll's own preceding os.Remove has no backup
 // step of its own either (audit 2026-09-29, P01).
+//
+// DirtyFiles compares by running the clean filter (that's what `git diff
+// HEAD` against a filtered path does), which can itself be the reason a
+// file not actually edited shows up here: a mode: value field's tag from
+// before spec 03 AC-3.10 authenticated its type re-encrypts to different
+// bytes than what's committed the moment anything cleans it again, since
+// the AAD it's produced under changed. That's a real difference the
+// filter would otherwise stage silently, so still refusing here is the
+// right default — the error message points at the fix (`git add
+// --renormalize`, committed, upgrades the tag; renormalizing without
+// committing only updates the index, and this check compares against
+// HEAD regardless) rather than assuming it's always an actual edit.
 var ErrDirtyManagedFiles = errors.New("gitutil: managed file(s) have local changes CheckoutAll would discard")
 
 // DirtyFiles returns the subset of files (repo-relative paths) whose
@@ -278,7 +290,7 @@ func CheckoutAll(repoRoot string) (decrypted int, failures []CheckoutFailure, er
 	if dirty, dirtyErr := DirtyFiles(repoRoot, files); dirtyErr != nil {
 		return 0, nil, dirtyErr
 	} else if len(dirty) > 0 {
-		return 0, nil, fmt.Errorf("%w: %s", ErrDirtyManagedFiles, strings.Join(dirty, ", "))
+		return 0, nil, fmt.Errorf("%w: %s (if these have not actually been edited, a mode: value field's tag may still be in the pre-authenticated-type form — run `git add --renormalize -- <path>`, commit the result, then retry; renormalizing alone updates the index, not HEAD, which this check compares against)", ErrDirtyManagedFiles, strings.Join(dirty, ", "))
 	}
 
 	for _, f := range files {

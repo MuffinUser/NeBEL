@@ -37,6 +37,23 @@
 // rotate` and `git add --renormalize` already perform for spec 11), the
 // same way a value converges onto a new key version.
 //
+// That convergence closes P05 only for the current, committed tag —
+// not for the field's history. A legacy ciphertext, once committed,
+// stays a valid AES256_SIV tag forever: nothing about upgrading the
+// current commit changes it, or the key version it names (spec 11
+// AC-11.5 keeps every version's key registered indefinitely). An
+// attacker with write access can resurrect that old blob from git
+// history — or a stale branch, or another clone's reflog — with its
+// type field re-flipped, and it authenticates exactly as it did the
+// day it was committed, since Smudge picks the (unbound) legacy AAD
+// for anything naming AES256_SIV. Reaching that ciphertext at all
+// already requires the write access P05 assumes; validTypeLiteral
+// (internal/filterop) additionally limits what a successful flip can
+// render to a genuine literal of the new type, narrowing rather than
+// closing the gap. Fully closing it would mean actively revoking the
+// old key version — not merely superseding it — which spec 11's
+// rotation does not do and is out of scope here.
+//
 // key is mandatory (AC-3.6): this is a breaking format change from the
 // pre-rotation tag (no key field at all), landing alongside spec 11.
 // There is no in-tool migration: the config's own canary is checked

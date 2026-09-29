@@ -61,7 +61,7 @@ func runAddFile(args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("usage: nebel add file <glob>")
 	}
-	glob := args[0]
+	glob := normalizePath(args[0])
 
 	root, configPath, cfg, err := openConfig()
 	if err != nil {
@@ -106,15 +106,15 @@ func runAddField(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: nebel add field <file> [path...]")
 	}
-	target, paths := args[0], args[1:]
+	target, paths := normalizePath(args[0]), args[1:]
 
 	root, configPath, cfg, err := openConfig()
 	if err != nil {
 		return err
 	}
 
-	// The rule pattern is stored as given, but the document is read from
-	// the working tree, so the argument has to name a real file.
+	// The document is read from the working tree, so the argument has to
+	// name a real file.
 	source, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(target)))
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", target, err)
@@ -158,6 +158,12 @@ func runAddField(args []string) error {
 		fmt.Printf("  %s\n", path)
 	}
 	return renormalizeAndReport(root, cfg, target)
+}
+
+// normalizePath gives a CLI path or glob the repo-relative, slash-separated
+// form git reports, so it matches what MatchRule later compares it against.
+func normalizePath(path string) string {
+	return filepath.ToSlash(filepath.Clean(path))
 }
 
 // existingFields returns the paths already configured for pattern.

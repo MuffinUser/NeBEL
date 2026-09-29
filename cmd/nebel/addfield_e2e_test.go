@@ -121,6 +121,62 @@ func TestAddFieldRejectsMissingPath(t *testing.T) {
 	}
 }
 
+// issue #8: a leading "./" on the path must be normalized away before it
+// reaches .gitattributes and the config, or the pattern silently fails to
+// match the file git reports without it.
+func TestAddFieldNormalizesRelativePath(t *testing.T) {
+	pathEnv := pathEnvWithBin(t)
+	repo := setupValueRepo(t, pathEnv)
+
+	runIn(t, repo, pathEnv, "nebel", "add", "field", "./config/staging.yaml", "database.password")
+
+	attrs, err := os.ReadFile(filepath.Join(repo, gitattributesName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(attrs), "./config/staging.yaml") {
+		t.Errorf("%s still has an un-normalized ./ prefix:\n%s", gitattributesName, attrs)
+	}
+	if !strings.Contains(string(attrs), "config/staging.yaml filter=nebel") {
+		t.Errorf("%s is missing the normalized pattern:\n%s", gitattributesName, attrs)
+	}
+
+	cfg, err := os.ReadFile(filepath.Join(repo, ".nebel.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(cfg), "./config/staging.yaml") {
+		t.Errorf(".nebel.yaml still has an un-normalized ./ prefix:\n%s", cfg)
+	}
+
+	runIn(t, repo, pathEnv, "git", "add", ".")
+	runIn(t, repo, pathEnv, "git", "commit", "-q", "-m", "encrypt fields")
+	stored := runIn(t, repo, pathEnv, "git", "show", "HEAD:config/staging.yaml")
+	if strings.Contains(stored, "s3cr3t") {
+		t.Errorf("path given with a ./ prefix was not actually encrypted:\n%s", stored)
+	}
+}
+
+// issue #8, mode: file variant: the same normalization applies to
+// `add file`'s glob argument.
+func TestAddFileNormalizesRelativePath(t *testing.T) {
+	pathEnv := pathEnvWithBin(t)
+	repo := setupValueRepo(t, pathEnv)
+
+	runIn(t, repo, pathEnv, "nebel", "add", "file", "./config/*.yaml")
+
+	attrs, err := os.ReadFile(filepath.Join(repo, gitattributesName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(attrs), "./config/*.yaml") {
+		t.Errorf("%s still has an un-normalized ./ prefix:\n%s", gitattributesName, attrs)
+	}
+	if !strings.Contains(string(attrs), "config/*.yaml filter=nebel") {
+		t.Errorf("%s is missing the normalized pattern:\n%s", gitattributesName, attrs)
+	}
+}
+
 // The two subcommands write different rules for the same path, so mixing
 // them is refused rather than silently reinterpreting one as the other.
 func TestAddFileAndFieldConflict(t *testing.T) {

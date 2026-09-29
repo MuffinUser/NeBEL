@@ -47,7 +47,7 @@ no internet. Adjust the filename to your version.
 **Windows** (PowerShell), then open a new terminal:
 
 ```powershell
-$Zip  = "$HOME\Downloads\nebel_v0.3.0_windows_amd64.zip"
+$Zip  = "$HOME\Downloads\nebel_v0.4.1_windows_amd64.zip"
 $Dest = "$env:LOCALAPPDATA\Programs\nebel"
 
 Unblock-File $Zip     # clears the "downloaded from the internet" mark
@@ -69,7 +69,7 @@ project) — it keeps the PATH it had when it started.
 **macOS** (`amd64` instead of `arm64` on Intel):
 
 ```sh
-tar -xzf ~/Downloads/nebel_v0.3.0_darwin_arm64.tar.gz -C /tmp
+tar -xzf ~/Downloads/nebel_v0.4.1_darwin_arm64.tar.gz -C /tmp
 sudo mv /tmp/nebel_*_darwin_*/nebel /usr/local/bin/
 xattr -d com.apple.quarantine /usr/local/bin/nebel   # if Gatekeeper blocks it
 ```

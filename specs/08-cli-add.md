@@ -43,3 +43,17 @@ diff. A bare `add <glob>` names neither and is refused with usage.
 - **AC-8.10**: after `add` succeeds, the new rule is immediately visible to
   `nebel status` (spec 09) and to the git filter driver (spec 06) —
   no separate reload step needed.
+- **AC-8.11**: after writing the rule, `add` re-encrypts every file
+  already tracked and matching it — a `git add --renormalize` equivalent,
+  scoped to files the new rule (or an existing rule it just added a field
+  to) resolves to, per spec 04's `MatchRule` precedence rather than a raw
+  pathspec match on the glob itself. Without this, a file that was
+  already tracked and unchanged in the working tree stays plaintext
+  indefinitely: git only re-invokes the clean filter for a path when it
+  can't trust its own cached stat info for that path, and an
+  already-settled, already-tracked file commonly gives it no reason not
+  to, a new `.gitattributes` line notwithstanding. A pattern matching no
+  tracked file yet — the common case for a brand new rule — is not an
+  error. Files it does re-encrypt are reported, along with a reminder
+  that this only protects future commits: content already committed in
+  plaintext is still recoverable from history.

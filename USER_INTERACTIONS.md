@@ -101,6 +101,22 @@ $ nebel add file "secrets/*.pem"
 Added rule: secrets/*.pem (mode: file)
 ```
 
+If `secrets/*.pem` already matches files that were tracked before this
+rule existed, they're encrypted right away, not left for the next edit to
+pick up:
+
+```
+$ nebel add file "secrets/*.pem"
+Added rule: secrets/*.pem (mode: file)
+Encrypted and staged 2 files already tracked and matching this rule:
+  secrets/prod.pem
+  secrets/staging.pem
+
+⚠ This only protects future commits — the old plaintext is still
+  recoverable from git history. If this repo has been pushed anywhere,
+  change the underlying secret(s), not just the file.
+```
+
 ### `add field <file> [path...]` — per-value mode
 
 For config you still want to read and diff in git. Paths are dot notation
@@ -138,8 +154,16 @@ Added to rule config/staging.yaml (mode: value):
 - Re-running with the same paths is a no-op.
 - Supported formats: YAML and JSON. `.env` and `.properties` are not
   implemented yet.
-- Both subcommands also add the pattern to `.gitattributes`. After that the
-  normal `git add`/`git commit` flow picks the rule up — no further step.
+- Both subcommands also add the pattern to `.gitattributes`, then
+  immediately re-encrypt any file the new rule already matches among
+  files git currently tracks — no further step, even for a file that
+  predates the rule and hasn't been touched since. (A brand new rule
+  commonly matches nothing yet — that's not an error, just nothing to
+  report.) Anything it re-encrypts was, by definition, still readable in
+  plaintext form in git history before this command ran; if the repo has
+  been pushed anywhere, treat the underlying secret as exposed and change
+  it (not `nebel rotate`, which only changes the shared password — see §
+  4), the same as after any other accidental plaintext commit.
 
 ## 3. `nebel status`
 

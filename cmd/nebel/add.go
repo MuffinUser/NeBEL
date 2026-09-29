@@ -76,7 +76,10 @@ func runAddFile(args []string) error {
 			return fmt.Errorf("%q is already registered with mode: %s — mode conflict", glob, r.Mode)
 		}
 		fmt.Printf("Rule already exists: %s (mode: file)\n", glob)
-		return addGitattributesPattern(root, glob) // idempotent; covers a hand-edited config missing the .gitattributes line
+		if err := addGitattributesPattern(root, glob); err != nil { // idempotent; covers a hand-edited config missing the .gitattributes line
+			return err
+		}
+		return renormalizeAndReport(root, cfg, glob)
 	}
 
 	cfg.Rules = append(cfg.Rules, config.Rule{Files: glob, Mode: config.ModeFile})
@@ -88,7 +91,7 @@ func runAddFile(args []string) error {
 	}
 
 	fmt.Printf("Added rule: %s (mode: file)\n", glob)
-	return nil
+	return renormalizeAndReport(root, cfg, glob)
 }
 
 // runAddField implements `nebel add field <file> [path...]` (AC-8.2).
@@ -134,7 +137,10 @@ func runAddField(args []string) error {
 	}
 	if len(added) == 0 {
 		fmt.Printf("No new fields to add for %s.\n", target)
-		return addGitattributesPattern(root, target)
+		if err := addGitattributesPattern(root, target); err != nil {
+			return err
+		}
+		return renormalizeAndReport(root, cfg, target)
 	}
 
 	if err := applyFieldRule(cfg, target, added); err != nil {
@@ -151,7 +157,7 @@ func runAddField(args []string) error {
 	for _, path := range added {
 		fmt.Printf("  %s\n", path)
 	}
-	return nil
+	return renormalizeAndReport(root, cfg, target)
 }
 
 // existingFields returns the paths already configured for pattern.
@@ -200,6 +206,68 @@ func applyFieldRule(cfg *config.Config, pattern string, added []string) error {
 		return nil
 	}
 	cfg.Rules = append(cfg.Rules, config.Rule{Files: pattern, Mode: config.ModeValue, Encrypt: added})
+	return nil
+}
+
+// filesMatchingNewRule returns every currently tracked file that
+// cfg.MatchRule resolves to the rule named pattern — the one this `add`
+// call just wrote or reconfirmed — rather than whatever a raw pathspec
+// match on pattern would return. That distinction matters twice over:
+// spec 08's glob and .gitattributes' pattern can disagree on what they
+// match (audit finding, cross-directory `*.env` semantics), and `git add
+// --renormalize`'s own pathspec form errors outright when pattern
+// matches no tracked file yet — which a brand-new glob commonly does,
+// before anything matching it has ever been committed.
+func filesMatchingNewRule(root string, cfg *config.Config, pattern string) ([]string, error) {
+	tracked, err := gitutil.TrackedFiles(root)
+	if err != nil {
+		return nil, err
+	}
+	var matched []string
+	for _, f := range tracked {
+		if r, ok := cfg.MatchRule(f); ok && r.Files == pattern {
+			matched = append(matched, f)
+		}
+	}
+	return matched, nil
+}
+
+// renormalizeAndReport brings every already-tracked file matching
+// pattern's rule under that rule immediately, instead of leaving it
+// exactly as it was until something unrelated later edits it.
+//
+// Without this, a file that was already tracked and unchanged before
+// `add` registered a rule for it can sit unencrypted indefinitely
+// afterward: git only re-invokes the clean filter for a path when it
+// can't trust its own cached stat info for that path, and a settled,
+// already-tracked file commonly gives it no reason not to — a new
+// `.gitattributes` line routing the path through nebel notwithstanding.
+// `add`'s own documented "no further step" promise depends on this.
+func renormalizeAndReport(root string, cfg *config.Config, pattern string) error {
+	files, err := filesMatchingNewRule(root, cfg, pattern)
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		return nil
+	}
+
+	migrated, err := gitutil.Renormalize(root, files)
+	if err != nil {
+		return fmt.Errorf("encrypting already-tracked files matching %s (fix by hand with `git add --renormalize -- %s`): %w", pattern, strings.Join(files, " "), err)
+	}
+	if len(migrated) == 0 {
+		return nil
+	}
+
+	fmt.Printf("Encrypted and staged %s already tracked and matching this rule:\n", plural(len(migrated), "file"))
+	for _, path := range migrated {
+		fmt.Printf("  %s\n", path)
+	}
+	fmt.Println()
+	fmt.Println("⚠ This only protects future commits — the old plaintext is still")
+	fmt.Println("  recoverable from git history. If this repo has been pushed anywhere,")
+	fmt.Println("  change the underlying secret(s), not just the file.")
 	return nil
 }
 

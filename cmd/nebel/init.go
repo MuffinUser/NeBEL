@@ -6,6 +6,7 @@ package main
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -216,21 +217,38 @@ func joinRepo(root, configPath, password string) error {
 	return reportCheckoutResult(root, cfg, decrypted, failures)
 }
 
+// ErrCheckoutFailed is returned by reportCheckoutResult when at least one
+// managed file's re-checkout genuinely failed (AC-6.9's tamper/corruption
+// signal, surfaced by CheckoutAll as a gitutil.CheckoutFailure) — as
+// opposed to a file that merely still needs a key version this clone
+// hasn't fetched yet (AC-6.11's intentional, recoverable passthrough,
+// TestInitVersionRecoversContentFromBeforeRotation), which keeps exiting 0
+// exactly as before (audit 2026-09-29, P12): a script driven by exit code
+// alone could otherwise mistake a genuinely corrupted or tampered file for
+// a clean, fully-usable checkout.
+var ErrCheckoutFailed = errors.New("one or more managed files could not be re-checked-out")
+
 // reportCheckoutResult prints CheckoutAll's outcome for join and
 // --version alike: a plain "N decrypted" success, a diagnostic for
 // "nothing is wired to the filter at all" (total == 0), or — with
 // failures — each path and why, sourced two ways. CheckoutAll's own
 // failures are genuine per-file checkout errors (AC-6.9's tamper error,
-// say). But smudge no longer errors just because a version is missing
-// (spec 06 AC-6.11): it passes the content through instead, with a
-// warning already printed live during the checkout above, and
-// CheckoutAll counts that as "decrypted" since the checkout itself
-// succeeded. scanUndecrypted re-inspects the working tree afterward to
-// catch exactly that gap, moving each still-encrypted path from
-// "decrypted" to the report below (skipping any path CheckoutAll already
-// flagged, so a genuine failure isn't listed twice under two different
-// reasons).
+// say) — genuineFailures below counts only these, before the merge just
+// under it adds the second source. That second source: smudge no longer
+// errors just because a version is missing (spec 06 AC-6.11): it passes
+// the content through instead, with a warning already printed live during
+// the checkout above, and CheckoutAll counts that as "decrypted" since the
+// checkout itself succeeded. scanUndecrypted re-inspects the working tree
+// afterward to catch exactly that gap, moving each still-encrypted path
+// from "decrypted" to the report below (skipping any path CheckoutAll
+// already flagged, so a genuine failure isn't listed twice under two
+// different reasons) — but, unlike a genuine failure, an AC-6.11 passthrough
+// on its own must not turn the command's exit code into a failure; it's an
+// expected, recoverable state (`nebel init --version N` fixes it) that the
+// existing TestInitVersionRecoversContentFromBeforeRotation already relies
+// on succeeding.
 func reportCheckoutResult(root string, cfg *config.Config, decrypted int, failures []gitutil.CheckoutFailure) error {
+	genuineFailures := len(failures)
 	alreadyReported := make(map[string]bool, len(failures))
 	for _, f := range failures {
 		alreadyReported[f.Path] = true
@@ -294,6 +312,9 @@ func reportCheckoutResult(root string, cfg *config.Config, decrypted int, failur
 	fmt.Printf("Done. %s decrypted locally; %s could not be:\n", plural(decrypted, "file"), plural(len(failures), "file"))
 	for _, f := range failures {
 		fmt.Printf("  %s: %s\n", f.Path, f.Reason)
+	}
+	if genuineFailures > 0 {
+		return fmt.Errorf("%w: %s", ErrCheckoutFailed, plural(genuineFailures, "file"))
 	}
 	return nil
 }

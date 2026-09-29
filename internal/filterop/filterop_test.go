@@ -62,6 +62,39 @@ func TestCleanSkipsAlreadyEncrypted(t *testing.T) {
 	}
 }
 
+// audit 2026-09-29, P08: a plaintext value that merely starts with "ENC["
+// without being a well-formed tag must not be mistaken for
+// already-encrypted content — it needs to actually get encrypted like any
+// other plaintext, not pass through Clean unchanged.
+func TestCleanEncryptsPlaintextStartingWithEncPrefix(t *testing.T) {
+	input := []byte("ENC[mein-geheimnis")
+	got, err := Clean(testConfig(), testKeyring, "secrets/prod.pem", input)
+	if err != nil {
+		t.Fatalf("Clean: %v", err)
+	}
+	if bytes.Equal(got, input) {
+		t.Error(`Clean() left a plaintext value starting with "ENC[" unencrypted`)
+	}
+	if !tag.IsEncrypted(got) {
+		t.Errorf("Clean() output is not tagged: %q", got)
+	}
+}
+
+// A genuine pre-rotation whole-file tag (no "key:" field at all — see
+// internal/tag's doc comment) must still be left alone rather than
+// double-wrapped: LooksEncrypted is deliberately more lenient than a bare
+// prefix check specifically so this legacy shape still counts as "ours".
+func TestCleanLeavesLegacyWholeFileTagAlone(t *testing.T) {
+	legacy := "ENC[AES256_SIV,data:c29tZXRoaW5n]"
+	got, err := Clean(testConfig(), testKeyring, "secrets/prod.pem", []byte(legacy))
+	if err != nil {
+		t.Fatalf("Clean: %v", err)
+	}
+	if string(got) != legacy {
+		t.Errorf("Clean() modified a legacy pre-rotation tag:\n got  = %q\n want = %q", got, legacy)
+	}
+}
+
 // The whole-file counterpart of TestCleanValuesNoKeyNeededWhenNothingToEncrypt:
 // content that's already a well-formed ENC[...] tag needs no key at all
 // to clean, current version or otherwise, since there's nothing left to

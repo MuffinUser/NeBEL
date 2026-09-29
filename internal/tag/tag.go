@@ -155,8 +155,52 @@ var (
 // Detection is prefix-only by design: it must be cheap enough to run on
 // every value the clean/smudge filter sees, and it must agree with Decode on
 // what counts as "this is ours" without needing a full parse first.
+//
+// This makes it a safe fast-path *rejection* test (raw definitely isn't a
+// tag if this is false) but not a safe basis for treating raw as
+// already-encrypted plaintext to skip over: a plaintext value that merely
+// starts with "ENC[" — e.g. a password containing that literal substring —
+// also satisfies this check without being a well-formed tag at all (audit
+// 2026-09-29, P08). A caller deciding whether something needs encrypting
+// (clean's "already tagged, leave it alone" branches) must use
+// LooksEncrypted instead; only a caller already committed to treating
+// malformed input as corruption (smudge's AC-6.9 path) may use this bare
+// prefix check as a pre-check before a full Parse.
 func IsEncrypted(raw []byte) bool {
 	return strings.HasPrefix(string(raw), prefix)
+}
+
+// LooksEncrypted reports whether raw is shaped like one of this package's
+// ENC[...] tags — delimiters present, and the first comma-separated field
+// naming a recognized algorithm — without requiring the rest of it
+// (notably "key:") to be present or well-formed.
+//
+// This is deliberately more lenient than a full Parse: a pre-rotation tag
+// (this package's doc comment) has no "key:" field at all and fails Parse
+// for that reason alone, yet is genuine, already-encrypted content with
+// its own documented migration path (README's "Upgrading from a
+// pre-rotation repository"), not plaintext to encrypt over. LooksEncrypted
+// still recognizes it as "ours" so Clean/cleanValues leave it alone
+// (AC-6.4) instead of double-wrapping it — unlike the bare prefix check
+// IsEncrypted performs, which would also (wrongly) call a plaintext value
+// that merely starts with "ENC[" already-encrypted (audit 2026-09-29,
+// P08). Requiring a recognized algorithm name right after the prefix, plus
+// the closing "]", is enough to tell the two apart in practice: real
+// plaintext coincidentally matching that exact shape is far less likely
+// than merely starting with "ENC[".
+func LooksEncrypted(raw []byte) bool {
+	s := string(raw)
+	if !strings.HasPrefix(s, prefix) || !strings.HasSuffix(s, suffix) {
+		return false
+	}
+	inner := s[len(prefix) : len(s)-len(suffix)]
+	algo, _, _ := strings.Cut(inner, ",")
+	switch algo {
+	case AlgoAES256SIV, AlgoAES256SIVTypeBound:
+		return true
+	default:
+		return false
+	}
 }
 
 // Encode wraps ciphertext produced for a whole file into an ENC[...] tag,

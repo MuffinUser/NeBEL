@@ -56,6 +56,22 @@ func TestCleanValuesEncryptsOnlyConfiguredFields(t *testing.T) {
 	}
 }
 
+// audit 2026-09-29, P08 (value-mode counterpart of
+// TestCleanEncryptsPlaintextStartingWithEncPrefix): a configured field
+// whose plaintext value merely starts with "ENC[" must still get
+// encrypted, not be mistaken for an already-encrypted field and left as
+// committed plaintext.
+func TestCleanValuesEncryptsFieldStartingWithEncPrefix(t *testing.T) {
+	doc := "password: \"ENC[mein-geheimnis, not actually a tag\"\n"
+	got, err := Clean(valueConfig("password"), testKeyring, "config/staging.yaml", []byte(doc))
+	if err != nil {
+		t.Fatalf("Clean: %v", err)
+	}
+	if strings.Contains(string(got), "mein-geheimnis") {
+		t.Errorf("plaintext field value starting with \"ENC[\" survived clean:\n%s", got)
+	}
+}
+
 // AC-6.5 / AC-5.1 for per-value mode: everything the rule does not name
 // survives a clean/smudge round trip byte for byte — comments, spacing,
 // key order, and unrelated values.

@@ -80,7 +80,7 @@ func Clean(cfg *config.Config, keyring Keyring, filePath string, input []byte) (
 	if rule.Mode == config.ModeValue {
 		return cleanValues(rule, version, key, haveKey, filePath, input)
 	}
-	if tag.IsEncrypted(input) {
+	if tag.LooksEncrypted(input) {
 		// Already encrypted: leave it alone (AC-6.4). Re-encrypting here
 		// would still be deterministic and produce the same bytes, but
 		// skipping it avoids ever decrypting-then-recrypting content this
@@ -88,6 +88,15 @@ func Clean(cfg *config.Config, keyring Keyring, filePath string, input []byte) (
 		// value this clone can't decrypt because its key version is
 		// missing locally: it stays as-is rather than getting
 		// double-wrapped.
+		//
+		// LooksEncrypted, not tag.IsEncrypted's prefix-only check (audit
+		// 2026-09-29, P08): a plaintext value that merely starts with
+		// "ENC[" without the rest of the tag shape must fall through to
+		// the encryption below like any other plaintext, not be mistaken
+		// for already-encrypted content and committed as-is. Unlike a full
+		// Parse, LooksEncrypted still recognizes a pre-rotation tag (no
+		// "key:" field — see internal/tag's doc comment) as genuine
+		// ciphertext rather than double-wrapping it.
 		return input, nil
 	}
 	if !haveKey {
@@ -183,7 +192,12 @@ func cleanValues(rule config.Rule, version int, key []byte, haveKey bool, filePa
 		if err != nil {
 			return nil, fmt.Errorf("filterop: clean %s: %w", filePath, err)
 		}
-		if tag.IsEncrypted([]byte(span.Value)) {
+		if tag.LooksEncrypted([]byte(span.Value)) {
+			// See Clean's doc comment (audit 2026-09-29, P08): LooksEncrypted,
+			// not a bare prefix check, so a plaintext field value that
+			// merely starts with "ENC[" isn't mistaken for an
+			// already-encrypted field and left as committed plaintext —
+			// while a genuine pre-rotation tag still isn't double-wrapped.
 			continue
 		}
 		if !haveKey {

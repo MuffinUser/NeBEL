@@ -41,6 +41,31 @@ space, and would produce git diffs on lines nobody edited.
   ciphertext derives from the value, not the styling, so a re-quoted
   scalar still cleans to an identical blob: git shows no diff, and the
   drift is confined to the working tree, once.
+- **AC-5.14 Control characters are escaped, not spliced in raw**: a
+  decrypted string containing a control character (newline, tab, ...) is
+  rendered with an explicit escape sequence, not the literal byte. A raw
+  control character spliced directly into a double-quoted scalar is not
+  a syntax error, but is silently reinterpreted by YAML's own
+  line-folding rules on the next parse — e.g. a literal newline becomes a
+  plain space — changing the logical value on a later decrypt/encrypt
+  round trip with no error ever raised (2026-09-29 audit, P10). `\n`,
+  `\r`, `\t`, `\0`, `\a`, `\b`, `\v`, `\f`, and `\e` (YAML's own
+  single-character escapes) are supported. A control character with no
+  such escape is refused outright with a clear error rather than
+  attempted via a `\xHH`/`\uHHHH` hex escape: the `goccy/go-yaml` parser
+  this codebase depends on has a confirmed bug mistracking a scalar
+  token's source span for any hex escape, which would silently corrupt a
+  later `Locate` of that same field instead of failing where the problem
+  actually is.
+- **AC-5.15 Multi-document YAML is rejected**: a source containing more
+  than one `---`-separated document fails clearly rather than silently
+  operating on only the first. Resolving a path across documents raises
+  its own ambiguity (the same path present in two documents: which one
+  does a single `encrypt` entry protect, and which does smudge restore
+  into?) that this codebase does not attempt to resolve; a configured
+  path matching a leaf only in a later document previously went
+  undetected entirely — never encrypted, never even reported as missing
+  (2026-09-29 audit, P11).
 
 ## JSON
 

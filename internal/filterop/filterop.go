@@ -214,11 +214,15 @@ func cleanValues(rule config.Rule, version int, key []byte, haveKey bool, filePa
 			return nil, fmt.Errorf("filterop: clean %s at %s: %w", filePath, field, err)
 		}
 		// The tag is a string whatever the scalar's original type was, so
-		// it is rendered as one; the type travels inside the tag.
-		edits = append(edits, format.Edit{
-			Span: span,
-			Text: handler.Render(tag.EncodeValue(ciphertext, version, span.Type), tag.TypeStr),
-		})
+		// it is rendered as one; the type travels inside the tag. Render
+		// only fails on a control character it can't safely escape
+		// (audit 2026-09-29, P10) — impossible here, since a tag's own
+		// text is always base64 plus a fixed vocabulary of field names.
+		rendered, err := handler.Render(tag.EncodeValue(ciphertext, version, span.Type), tag.TypeStr)
+		if err != nil {
+			return nil, fmt.Errorf("filterop: clean %s at %s: %w", filePath, field, err)
+		}
+		edits = append(edits, format.Edit{Span: span, Text: rendered})
 	}
 	return splice(input, edits, "clean", filePath)
 }
@@ -293,7 +297,11 @@ func smudgeValues(rule config.Rule, keyring Keyring, filePath string, input []by
 		if err := validTypeLiteral(string(plaintext), parsed.Type); err != nil {
 			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, err)
 		}
-		edits = append(edits, format.Edit{Span: span, Text: handler.Render(string(plaintext), parsed.Type)})
+		rendered, err := handler.Render(string(plaintext), parsed.Type)
+		if err != nil {
+			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, err)
+		}
+		edits = append(edits, format.Edit{Span: span, Text: rendered})
 	}
 	out, err := splice(input, edits, "smudge", filePath)
 	return out, skipped, err

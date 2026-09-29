@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/MuffinUser/nebel/internal/config"
+	"github.com/MuffinUser/nebel/internal/format"
 	"github.com/MuffinUser/nebel/internal/siv"
 	"github.com/MuffinUser/nebel/internal/tag"
 )
@@ -88,6 +89,53 @@ func TestValueRoundTripLeavesUntouchedBytesExact(t *testing.T) {
 	}
 	if string(smudged) != valueDoc {
 		t.Errorf("round trip changed the file:\n got  = %q\n want = %q", smudged, valueDoc)
+	}
+}
+
+// audit 2026-09-29, P10, end-to-end: a field value containing a real
+// newline (not the two-character escape) must survive a full Clean then
+// Smudge cycle unchanged, through the actual encrypted tag — not just
+// Render in isolation.
+func TestValueRoundTripPreservesEmbeddedNewline(t *testing.T) {
+	cfg := valueConfig("database.password")
+	doc := "database:\n  password: \"line one\\nline two\"\n"
+
+	cleaned, err := Clean(cfg, testKeyring, "config/staging.yaml", []byte(doc))
+	if err != nil {
+		t.Fatalf("Clean: %v", err)
+	}
+	smudged, _, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned)
+	if err != nil {
+		t.Fatalf("Smudge: %v", err)
+	}
+	if string(smudged) != doc {
+		t.Errorf("round trip changed the file:\n got  = %q\n want = %q", smudged, doc)
+	}
+}
+
+// A field whose plaintext already contains a control character YAML
+// cannot safely re-render (format.ErrControlCharacterUnsupported — see
+// yamlEscapeDoubleQuoted's doc comment for why a hex-escape fallback isn't
+// safe here) still cleans and encrypts without trouble — Clean never
+// renders the plaintext itself, only the resulting ENC[...] tag, which is
+// always plain ASCII. The failure surfaces on Smudge instead, where the
+// decrypted plaintext would actually need writing back into the
+// document, and it fails loudly rather than producing output a later
+// Locate could silently corrupt on.
+func TestSmudgeValuesRejectsUnrenderableControlCharacter(t *testing.T) {
+	cfg := valueConfig("database.password")
+	doc := "database:\n  password: \"a\x01b\"\n"
+
+	cleaned, err := Clean(cfg, testKeyring, "config/staging.yaml", []byte(doc))
+	if err != nil {
+		t.Fatalf("Clean: %v", err)
+	}
+	if strings.Contains(string(cleaned), "\x01") {
+		t.Fatalf("cleaned output still contains the raw control byte:\n%s", cleaned)
+	}
+
+	if _, _, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned); !errors.Is(err, format.ErrControlCharacterUnsupported) {
+		t.Errorf("Smudge error = %v, want %v", err, format.ErrControlCharacterUnsupported)
 	}
 }
 

@@ -28,9 +28,12 @@ type yamlHandler struct{}
 // resulting span back to real offsets in src, so Locate still splices
 // over the actual bytes on disk. When src has no "\r\n" at all, the map
 // is the identity and this is exactly the original behavior.
-func (yamlHandler) Locate(src []byte, path string) (Span, error) {
+func (h yamlHandler) Locate(src []byte, path string) (Span, error) {
 	steps, err := ParsePath(path)
 	if err != nil {
+		return Span{}, err
+	}
+	if err := checkUnambiguous(h, src, path); err != nil {
 		return Span{}, err
 	}
 

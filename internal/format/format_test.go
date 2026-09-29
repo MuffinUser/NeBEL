@@ -322,6 +322,57 @@ func TestLocateRejectsNonScalar(t *testing.T) {
 	}
 }
 
+// Regression tests for the 2026-09-29 audit's P03 and P04: a configured
+// path that resolves to more than one distinct value in the same document
+// must be refused, not silently resolved to whichever candidate a
+// targeted descent happens to reach first.
+func TestLocateRejectsAmbiguousPath(t *testing.T) {
+	for _, tt := range []struct {
+		name, file, src, path string
+	}{
+		// P03: a literal key containing a dot ("a.b") collides with the
+		// equivalent nested path ("a" containing "b") — dot notation
+		// can't tell them apart. Before the fix, Locate always resolved
+		// to the nested value ("decoy"), silently leaving the flat key's
+		// "secret" unencrypted while reporting success.
+		{"json dotted key collides with nested path", "c.json", `{"a.b":"secret","a":{"b":"decoy"}}`, "a.b"},
+		{"yaml dotted key collides with nested path", "c.yaml", "\"a.b\": secret\na:\n  b: decoy\n", "a.b"},
+
+		// P04: encoding/json's streaming decoder does not reject a
+		// duplicate object key the way go-yaml's parser does (see
+		// TestYAMLParserRejectsDuplicateKeys) — before the fix,
+		// descendObject returned the first occurrence's span, leaving
+		// the second occurrence (which, per encoding/json's own
+		// map-unmarshal semantics, most consumers would treat as the
+		// effective value) in plaintext.
+		{"json duplicate key", "c.json", `{"password":"eins","password":"zwei"}`, "password"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, err := For(tt.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.Locate([]byte(tt.src), tt.path); !errors.Is(err, ErrAmbiguousPath) {
+				t.Errorf("Locate(%q) error = %v, want %v", tt.path, err, ErrAmbiguousPath)
+			}
+		})
+	}
+}
+
+// Documents, rather than fixes, existing behavior: go-yaml's parser
+// already rejects an outright duplicate mapping key at parse time, unlike
+// encoding/json's streaming decoder (see TestLocateRejectsAmbiguousPath's
+// "json duplicate key" case) — so YAML needed no equivalent fix for P04.
+func TestYAMLParserRejectsDuplicateKeys(t *testing.T) {
+	h, err := For("c.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Locate([]byte("password: eins\npassword: zwei\n"), "password"); err == nil {
+		t.Error("Locate() on a YAML document with a duplicate key: want an error, got nil")
+	}
+}
+
 // Render is the decryption side: a restored value must come back with its
 // original type, not as a quoted string (AC-3.2).
 func TestRender(t *testing.T) {

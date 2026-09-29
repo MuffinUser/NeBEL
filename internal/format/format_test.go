@@ -5,6 +5,7 @@ package format
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -238,6 +239,48 @@ func TestLocateRejectsBlockScalars(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// audit 2026-09-29, P11: Locate and Leaves used to look only at the first
+// "---"-separated document, silently ignoring the rest — a configured
+// path matching a leaf only in a later document was never located, never
+// encrypted, and never even reported as missing. Both must now refuse a
+// multi-document source outright instead.
+func TestLocateAndLeavesRejectMultiDocumentYAML(t *testing.T) {
+	multiDoc := "password: eins\n---\npassword: zwei\n"
+
+	h, err := For("c.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Locate([]byte(multiDoc), "password"); !errors.Is(err, ErrMultiDocumentUnsupported) {
+		t.Errorf("Locate() error = %v, want %v", err, ErrMultiDocumentUnsupported)
+	}
+	if _, err := h.Leaves([]byte(multiDoc)); !errors.Is(err, ErrMultiDocumentUnsupported) {
+		t.Errorf("Leaves() error = %v, want %v", err, ErrMultiDocumentUnsupported)
+	}
+}
+
+// A single document, even one using "---" as its own leading document
+// marker (legal, common YAML — not a multi-document separator on its
+// own), must not be mistaken for multiple documents.
+func TestLocateAndLeavesAcceptSingleDocumentWithLeadingMarker(t *testing.T) {
+	singleDoc := "---\npassword: eins\n"
+
+	h, err := For("c.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	span, err := h.Locate([]byte(singleDoc), "password")
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if span.Value != "eins" {
+		t.Errorf("Locate() value = %q, want %q", span.Value, "eins")
+	}
+	if _, err := h.Leaves([]byte(singleDoc)); err != nil {
+		t.Errorf("Leaves: %v", err)
 	}
 }
 
@@ -506,8 +549,81 @@ func TestRender(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := h.Render(tt.value, tt.typ); got != tt.want {
+			got, err := h.Render(tt.value, tt.typ)
+			if err != nil {
+				t.Fatalf("Render(%q, %q): %v", tt.value, tt.typ, err)
+			}
+			if got != tt.want {
 				t.Errorf("Render(%q, %q) = %s, want %s", tt.value, tt.typ, got, tt.want)
+			}
+		})
+	}
+}
+
+// audit 2026-09-29, P10: Render used to escape only backslash and the
+// closing quote. A decrypted string containing a literal control
+// character (a real "\n" byte, not the two-character escape sequence)
+// was spliced into a double-quoted YAML scalar as-is — not a syntax
+// error, but silently reinterpreted by YAML's own line-folding rules on
+// the next parse, changing the logical value with no error ever raised.
+//
+// Every case here round-trips through the actual parser (Render, then
+// Locate on the result), not just an eyeballed escape syntax — the same
+// standard this codebase already holds P02's and the block-scalar fix to.
+func TestRenderEscapesYAMLControlCharacters(t *testing.T) {
+	h, err := For("c.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []string{
+		"line one\nline two", // newline
+		"a\rb",               // carriage return
+		"a\tb",               // tab
+		"a\r\nb",             // crlf
+		"a\x00b",             // null byte
+		"a\ab",               // bell
+		"a\bb",               // backspace
+		"a\vb",               // vertical tab
+		"a\fb",               // form feed
+		"a\x1bb",             // escape
+		"héllo wörld",        // unicode, unaffected
+	}
+	for _, value := range tests {
+		t.Run(fmt.Sprintf("%q", value), func(t *testing.T) {
+			rendered, err := h.Render(value, tag.TypeStr)
+			if err != nil {
+				t.Fatalf("Render(%q): %v", value, err)
+			}
+
+			src := []byte("password: " + rendered + "\n")
+			span, err := h.Locate(src, "password")
+			if err != nil {
+				t.Fatalf("Locate on rendered output: %v\nrendered: %q", err, rendered)
+			}
+			if span.Value != value {
+				t.Errorf("round trip: got %q, want %q (rendered as %q)", span.Value, value, rendered)
+			}
+		})
+	}
+}
+
+// audit 2026-09-29, P10 (the part that stays a hard error rather than a
+// silent fix): YAML has no single-character escape for most C0 control
+// codes, and the natural fallback — a "\xHH" hex escape — cannot be used
+// at all: verified empirically that the actual goccy/go-yaml parser this
+// codebase depends on mistracks a scalar token's Origin for *any* \x, \u,
+// or \U escape, which would corrupt yamlSpan's byte-offset math on the
+// next Locate of the same field. Render refuses these outright instead of
+// emitting something that would only break later.
+func TestRenderRejectsUnescapableControlCharacters(t *testing.T) {
+	h, err := For("c.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"a\x01b", "a\x0eb", "a\x1fb", "a\x7fb"} {
+		t.Run(fmt.Sprintf("%q", value), func(t *testing.T) {
+			if _, err := h.Render(value, tag.TypeStr); !errors.Is(err, ErrControlCharacterUnsupported) {
+				t.Errorf("Render(%q) error = %v, want %v", value, err, ErrControlCharacterUnsupported)
 			}
 		})
 	}

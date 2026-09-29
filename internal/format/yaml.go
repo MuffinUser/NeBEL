@@ -44,6 +44,9 @@ func (h yamlHandler) Locate(src []byte, path string) (Span, error) {
 	if err != nil {
 		return Span{}, fmt.Errorf("format: parsing YAML: %w", err)
 	}
+	if err := rejectMultiDocument(file); err != nil {
+		return Span{}, err
+	}
 	if len(file.Docs) == 0 || file.Docs[0].Body == nil {
 		return Span{}, fmt.Errorf("%w: %q (document is empty)", ErrNotFound, path)
 	}
@@ -87,6 +90,30 @@ func (h yamlHandler) Locate(src []byte, path string) (Span, error) {
 // handling for these styles to fall back on, so refusing them outright is
 // the safe behavior until they're properly supported.
 var ErrBlockScalarUnsupported = errors.New("format: literal (|) and folded (>) block scalars are not supported as mode: value fields")
+
+// ErrMultiDocumentUnsupported is returned when a YAML source contains more
+// than one "---"-separated document.
+//
+// Locate and Leaves both used to operate on file.Docs[0] alone, silently
+// ignoring every document after the first. A configured path matching a
+// leaf only in a later document was never located, never encrypted, and
+// never even reported as missing (audit 2026-09-29, P11) — full plaintext
+// exposure with no error at all. Extending path resolution across
+// documents raises its own unresolved ambiguity (the same path present in
+// two documents: which one does a single Encrypt entry protect, and which
+// does smudge restore into?), so this codebase refuses multi-document YAML
+// outright for mode: value rules rather than guess.
+var ErrMultiDocumentUnsupported = errors.New("format: multi-document YAML (\"---\"-separated) is not supported for mode: value fields")
+
+// rejectMultiDocument reports ErrMultiDocumentUnsupported if file has more
+// than one document, so Locate and Leaves fail loudly instead of silently
+// looking only at file.Docs[0].
+func rejectMultiDocument(file *ast.File) error {
+	if len(file.Docs) > 1 {
+		return fmt.Errorf("%w: found %d documents", ErrMultiDocumentUnsupported, len(file.Docs))
+	}
+	return nil
+}
 
 // crlfMap translates byte offsets computed against a CRLF-normalized copy
 // of a source buffer (every "\r\n" replaced by "\n") back to offsets in
@@ -298,13 +325,85 @@ func yamlStep(node ast.Node, step Step) (ast.Node, error) {
 // "[", "]" and "," and would otherwise terminate a flow sequence early.
 // Since the ciphertext is derived from the value and not its styling, a
 // re-quoted scalar still produces an identical blob and so no git diff.
-func (yamlHandler) Render(value string, t tag.Type) string {
+func (yamlHandler) Render(value string, t tag.Type) (string, error) {
 	switch t {
 	case tag.TypeInt, tag.TypeFloat, tag.TypeBool:
-		return value
+		return value, nil
 	default:
-		return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value) + `"`
+		escaped, err := yamlEscapeDoubleQuoted(value)
+		if err != nil {
+			return "", err
+		}
+		return `"` + escaped + `"`, nil
 	}
+}
+
+// ErrControlCharacterUnsupported is returned by Render when a decrypted
+// string contains a control character this build cannot safely render
+// into a YAML double-quoted scalar — see yamlEscapeDoubleQuoted.
+var ErrControlCharacterUnsupported = errors.New("format: value contains a control character that cannot be safely rendered as YAML")
+
+// yamlEscapeDoubleQuoted escapes value for a YAML double-quoted scalar.
+//
+// Beyond the backslash and closing quote a plain strings.Replacer used to
+// handle alone, every control character must be escaped too: an
+// unescaped, literal newline (or CR, tab, ...) spliced directly into a
+// double-quoted scalar is not a syntax error — it parses back out under
+// YAML's own line-folding rules, which silently turn a bare "\n" into a
+// space on the next read (audit 2026-09-29, P10). Left unescaped, a
+// decrypted value containing a real control character would change on
+// every future decrypt/encrypt round trip that touches its field, without
+// any error ever being raised.
+//
+// YAML defines single-character escapes for some, but not all, C0
+// control codes: \0 \a \b \t \n \v \f \r \e cover x00, x07-x0D, and x1B.
+// The natural fallback for the rest would be a "\xHH" hex escape — except
+// that, verified empirically against the actual goccy/go-yaml parser this
+// codebase uses, its lexer's Origin tracking is broken for *any* \x, \u,
+// or \U escape (confirmed independent of the escaped value: even a
+// harmless "\x41" comes back with a truncated Origin). yamlSpan's own
+// consistency check would catch the resulting corruption and error out —
+// but only the *next* time this exact field is cleaned, since Render's
+// output here is spliced straight into the working tree without being
+// re-parsed. That would make encrypting a value containing one of these
+// rarer control characters appear to succeed, only to permanently jam on
+// the next `git add`/`clean` of the same field. Refusing it immediately,
+// here, is the same "fail loudly rather than corrupt" choice this
+// package already makes for block scalars (ErrBlockScalarUnsupported).
+func yamlEscapeDoubleQuoted(value string) (string, error) {
+	var b strings.Builder
+	for _, r := range value {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case 0x00:
+			b.WriteString(`\0`)
+		case 0x07:
+			b.WriteString(`\a`)
+		case 0x08:
+			b.WriteString(`\b`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\n':
+			b.WriteString(`\n`)
+		case 0x0B:
+			b.WriteString(`\v`)
+		case 0x0C:
+			b.WriteString(`\f`)
+		case '\r':
+			b.WriteString(`\r`)
+		case 0x1B:
+			b.WriteString(`\e`)
+		default:
+			if r < 0x20 || r == 0x7f {
+				return "", fmt.Errorf("%w: %U", ErrControlCharacterUnsupported, r)
+			}
+			b.WriteRune(r)
+		}
+	}
+	return b.String(), nil
 }
 
 // pathPrefix renders the first n steps of a path for error messages.
@@ -329,6 +428,9 @@ func (yamlHandler) Leaves(src []byte) ([]Leaf, error) {
 	file, err := parser.ParseBytes(src, parser.ParseComments)
 	if err != nil {
 		return nil, fmt.Errorf("format: parsing YAML: %w", err)
+	}
+	if err := rejectMultiDocument(file); err != nil {
+		return nil, err
 	}
 	if len(file.Docs) == 0 || file.Docs[0].Body == nil {
 		return nil, nil

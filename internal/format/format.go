@@ -89,8 +89,11 @@ type Handler interface {
 	Leaves(src []byte) ([]Leaf, error)
 
 	// Render returns the literal source text for a value of type t —
-	// quoting it if the format requires quotes for that type.
-	Render(value string, t tag.Type) string
+	// quoting it if the format requires quotes for that type. An error
+	// means value cannot be safely rendered in this format at all — see
+	// yamlHandler.Render's doc comment for the one case that applies today
+	// (audit 2026-09-29, P10).
+	Render(value string, t tag.Type) (string, error)
 }
 
 // Leaf is one scalar in a document, addressable by Path.

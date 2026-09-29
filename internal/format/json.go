@@ -156,19 +156,22 @@ func jsonSpan(src []byte, before, after int64, tk json.Token) (Span, error) {
 
 // Render writes value as JSON source text. Unlike YAML there is no style
 // to lose: JSON strings are always double-quoted, so a decrypted value is
-// byte-identical to how it would have been written by hand.
-func (jsonHandler) Render(value string, t tag.Type) string {
+// byte-identical to how it would have been written by hand. Unlike YAML
+// (see yamlHandler.Render), encoding/json.Marshal already escapes every
+// control character unambiguously (\u00XX), so there is no P10-style gap
+// here and this never fails.
+func (jsonHandler) Render(value string, t tag.Type) (string, error) {
 	switch t {
 	case tag.TypeInt, tag.TypeFloat, tag.TypeBool:
-		return value
+		return value, nil
 	default:
 		encoded, err := json.Marshal(value)
 		if err != nil {
 			// json.Marshal of a string fails only on invalid UTF-8, which
 			// a decrypted JSON string cannot contain.
-			return `""`
+			return `""`, nil
 		}
-		return string(encoded)
+		return string(encoded), nil
 	}
 }
 

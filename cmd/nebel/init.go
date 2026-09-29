@@ -173,7 +173,8 @@ func bootstrapRepo(root, configPath, password string) error {
 	fmt.Println("  .gitattributes    (filter assignment — commit this)")
 	fmt.Println()
 	fmt.Println("Local filter registered. You're ready to use git normally.")
-	fmt.Println("Run `nebel add <glob>` to register files to encrypt.")
+	fmt.Println("Run `nebel add file <glob>` to encrypt whole files, or")
+	fmt.Println("    `nebel add field <file> [path...]` to encrypt named values inside a file.")
 	return nil
 }
 

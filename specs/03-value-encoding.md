@@ -6,6 +6,15 @@ project key version (spec 04, spec 11) produced this ciphertext — see
 REQUIREMENTS.md § Key rotation for why one project can have values under
 several versions at once.
 
+`ALGO` is `AES256_SIV_TB` for every value tag this build produces
+(`AES256_SIV` remains the whole-file form, spec 06) — `type`'s value is
+bound into the ciphertext's AAD (spec 02), so changing it needs the key,
+not just write access to the file it's stored in (AC-3.10). A value tag
+using plain `AES256_SIV` is the pre-AC-3.10 form: still accepted, since
+there is no in-tool migration (see spec 11 and this repo's
+`internal/tag` package doc comment), but its `type` field is not
+authenticated the same way.
+
 ## Acceptance criteria
 
 - **AC-3.1 Encode string**: encoding a string value under key version `V`
@@ -37,3 +46,14 @@ several versions at once.
   needs to know which version is "current" — the tag names its own
   version explicitly, and the caller (spec 06) is responsible for finding
   the matching key in the local keyring.
+- **AC-3.10 Type is authenticated**: a value tag's `type` field is bound
+  into its ciphertext's AAD (`ALGO` = `AES256_SIV_TB`), so changing
+  `type:str` to `type:bool` (or any other type) on an otherwise-untouched
+  tag fails authentication instead of silently changing how the decrypted
+  value renders — closing the gap where `type` sat next to the
+  ciphertext as unauthenticated plaintext metadata, changeable by anyone
+  with write access to the file, without the key (2026-09-29 audit, P05).
+  A value tag from before this fix (`ALGO` = `AES256_SIV`) has no `type`
+  binding and keeps decrypting exactly as it always did — there is no
+  in-tool migration for already-committed tags; a value converges onto
+  the bound form the next time anything re-encrypts it.

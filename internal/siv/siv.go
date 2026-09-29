@@ -42,17 +42,25 @@ var (
 	ErrAuth = errors.New("siv: authentication failed")
 )
 
-// AAD builds the associated data binding a ciphertext to one location.
+// AAD builds the associated data binding a ciphertext to one location, plus
+// any extra components a caller passes (spec 03 AC-3.10 binds a value's
+// native type this way, so tampering with a tag's separately-stored type
+// field — not itself ciphertext — fails authentication instead of silently
+// changing how the decrypted value is rendered).
 //
 // Without this binding, two fields holding the same secret would encrypt to
 // identical ciphertext, and a ciphertext could be copy-pasted between fields
 // and still decrypt. Components are length-prefixed, so no two distinct
-// (mode, filePath, fieldPath) triples can produce the same bytes.
+// (mode, filePath, fieldPath, extra...) tuples can produce the same bytes —
+// including between calls with a different number of extra components,
+// since each one is prefixed by its own length rather than only separated
+// from its neighbors.
 //
 // filePath is repo-relative. fieldPath is empty for ModeFile.
-func AAD(mode Mode, filePath, fieldPath string) []byte {
+func AAD(mode Mode, filePath, fieldPath string, extra ...string) []byte {
 	var aad []byte
-	for _, part := range []string{string(mode), filePath, fieldPath} {
+	parts := append([]string{string(mode), filePath, fieldPath}, extra...)
+	for _, part := range parts {
 		aad = binary.AppendUvarint(aad, uint64(len(part)))
 		aad = append(aad, part...)
 	}

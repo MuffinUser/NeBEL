@@ -189,7 +189,12 @@ func cleanValues(rule config.Rule, version int, key []byte, haveKey bool, filePa
 			return nil, fmt.Errorf("%w: current version %d — run `nebel init`", ErrKeyVersionMissing, version)
 		}
 
-		ciphertext, err := siv.Encrypt(key, []byte(span.Value), siv.AAD(siv.ModeValue, filePath, field))
+		// The type travels in the tag as plaintext metadata, not inside
+		// the ciphertext — so it's bound into the AAD instead, exactly
+		// like the file/field path components, otherwise it could be
+		// swapped (type:str -> type:bool) without needing the key at all
+		// (audit 2026-09-29, P05; spec 03 AC-3.10).
+		ciphertext, err := siv.Encrypt(key, []byte(span.Value), siv.AAD(siv.ModeValue, filePath, field, string(span.Type)))
 		if err != nil {
 			return nil, fmt.Errorf("filterop: clean %s at %s: %w", filePath, field, err)
 		}
@@ -243,7 +248,17 @@ func smudgeValues(rule config.Rule, keyring Keyring, filePath string, input []by
 			continue
 		}
 
-		plaintext, err := siv.Decrypt(key, parsed.Ciphertext, siv.AAD(siv.ModeValue, filePath, field))
+		// A legacy (pre-P05-fix) tag's ciphertext was never authenticated
+		// with its type in the AAD to begin with — reconstructing it with
+		// the type included here would fail authentication against a
+		// perfectly legitimate, untampered legacy tag, exactly as it
+		// would against a tampered one. Only a tag using
+		// AlgoAES256SIVTypeBound (Tag.TypeBound) was encrypted that way.
+		aad := siv.AAD(siv.ModeValue, filePath, field)
+		if parsed.TypeBound {
+			aad = siv.AAD(siv.ModeValue, filePath, field, string(parsed.Type))
+		}
+		plaintext, err := siv.Decrypt(key, parsed.Ciphertext, aad)
 		if err != nil {
 			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, err)
 		}

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -170,6 +171,56 @@ func TestParseWholeFileTagHasNoType(t *testing.T) {
 	}
 	if parsed.Type != TypeNone {
 		t.Errorf("Type = %q, want TypeNone", parsed.Type)
+	}
+	if parsed.TypeBound {
+		t.Error("TypeBound = true for a whole-file tag, want false")
+	}
+}
+
+// Regression test for the 2026-09-29 audit's P05: EncodeValue must always
+// produce a type-bound tag (AlgoAES256SIVTypeBound), so a caller
+// reconstructing the AAD for it knows to include the type — otherwise
+// Type sits next to the ciphertext as unauthenticated plaintext metadata,
+// changeable without the key.
+func TestEncodeValueUsesTypeBoundAlgo(t *testing.T) {
+	encoded := EncodeValue([]byte("ciphertext"), 1, TypeStr)
+	if !strings.HasPrefix(encoded, "ENC["+AlgoAES256SIVTypeBound+",") {
+		t.Errorf("EncodeValue() = %q, want it to start with \"ENC[%s,\"", encoded, AlgoAES256SIVTypeBound)
+	}
+	parsed, err := Parse(encoded)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !parsed.TypeBound {
+		t.Error("TypeBound = false, want true")
+	}
+}
+
+// A value tag from before this fix — AlgoAES256SIV, not
+// AlgoAES256SIVTypeBound — must still parse: there is no in-tool
+// migration, so every already-committed tag of this form must keep
+// working (see the package doc comment). TypeBound must come back false
+// for it, so a caller reconstructs the AAD it was actually encrypted
+// under (without the type), not the new formula.
+func TestParseLegacyValueTagIsNotTypeBound(t *testing.T) {
+	parsed, err := Parse("ENC[AES256_SIV,key:1,data:AAAA,type:str]")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if parsed.Type != TypeStr {
+		t.Errorf("Type = %q, want %q", parsed.Type, TypeStr)
+	}
+	if parsed.TypeBound {
+		t.Error("TypeBound = true for a legacy AES256_SIV value tag, want false")
+	}
+}
+
+// AlgoAES256SIVTypeBound exists to bind a type field; naming it on a
+// whole-file-shaped tag (no type field) has nothing to bind and is
+// malformed, not silently equivalent to plain AlgoAES256SIV.
+func TestParseRejectsTypeBoundWithoutType(t *testing.T) {
+	if _, err := Parse("ENC[AES256_SIV_TB,key:1,data:AAAA]"); !errors.Is(err, ErrMalformed) {
+		t.Errorf("Parse() error = %v, want %v", err, ErrMalformed)
 	}
 }
 

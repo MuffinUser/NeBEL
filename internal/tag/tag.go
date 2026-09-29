@@ -4,10 +4,11 @@
 // Package tag encodes and decodes the inline ENC[...] marker used to store
 // an encrypted value in place.
 //
-// Two forms share one parser:
+// Three forms share one parser:
 //
-//	ENC[AES256_SIV,key:<version>,data:<base64>]            whole file (spec 06)
-//	ENC[AES256_SIV,key:<version>,data:<base64>,type:str]   one value (spec 03)
+//	ENC[AES256_SIV,key:<version>,data:<base64>]               whole file (spec 06)
+//	ENC[AES256_SIV,key:<version>,data:<base64>,type:str]      one value, legacy (spec 03)
+//	ENC[AES256_SIV_TB,key:<version>,data:<base64>,type:str]   one value, type-bound (spec 03 AC-3.10)
 //
 // key records which project key version (spec 04, spec 11) produced the
 // ciphertext, so smudge can select the matching key from the local keyring
@@ -17,6 +18,41 @@
 // type, so it carries no type field — and must keep parsing without one,
 // since that is the form already committed in every repository created
 // before per-value mode existed.
+//
+// The two value forms differ in whether the type field is itself
+// authenticated. AES256_SIV_TB folds it into the ciphertext's AAD (see
+// internal/siv.AAD and internal/filterop's use of it), so changing
+// type:str to type:bool on an unmodified ciphertext — which needs no key,
+// since the type field sits next to the ciphertext as plaintext metadata,
+// not inside it — fails authentication instead of silently changing how
+// the decrypted value renders (audit 2026-09-29, P05). AES256_SIV plays
+// that same role for a value tag only because it predates this fix: every
+// tag EncodeValue produces now uses AES256_SIV_TB, but a legacy
+// AES256_SIV value tag already committed before this change remains
+// parseable and must keep authenticating exactly as it always did, so
+// Parse still accepts it — TypeBound distinguishes the two for a caller
+// deciding which AAD to reconstruct. There is no separate migration step
+// beyond that: a value converges to the new form the next time anything
+// re-encrypts it (an ordinary edit, or the eager re-encryption `nebel
+// rotate` and `git add --renormalize` already perform for spec 11), the
+// same way a value converges onto a new key version.
+//
+// That convergence closes P05 only for the current, committed tag —
+// not for the field's history. A legacy ciphertext, once committed,
+// stays a valid AES256_SIV tag forever: nothing about upgrading the
+// current commit changes it, or the key version it names (spec 11
+// AC-11.5 keeps every version's key registered indefinitely). An
+// attacker with write access can resurrect that old blob from git
+// history — or a stale branch, or another clone's reflog — with its
+// type field re-flipped, and it authenticates exactly as it did the
+// day it was committed, since Smudge picks the (unbound) legacy AAD
+// for anything naming AES256_SIV. Reaching that ciphertext at all
+// already requires the write access P05 assumes; validTypeLiteral
+// (internal/filterop) additionally limits what a successful flip can
+// render to a genuine literal of the new type, narrowing rather than
+// closing the gap. Fully closing it would mean actively revoking the
+// old key version — not merely superseding it — which spec 11's
+// rotation does not do and is out of scope here.
 //
 // key is mandatory (AC-3.6): this is a breaking format change from the
 // pre-rotation tag (no key field at all), landing alongside spec 11.
@@ -38,8 +74,16 @@ import (
 	"strings"
 )
 
-// AlgoAES256SIV is the only algorithm identifier this build understands.
+// AlgoAES256SIV is the algorithm identifier for a whole-file tag, and for
+// a legacy value tag produced before AlgoAES256SIVTypeBound existed (see
+// Tag.TypeBound).
 const AlgoAES256SIV = "AES256_SIV"
+
+// AlgoAES256SIVTypeBound is the algorithm identifier EncodeValue now
+// always produces: a value tag whose type field is bound into the
+// ciphertext's AAD, so tampering with it fails authentication (spec 03
+// AC-3.10, audit 2026-09-29 P05). See Tag.TypeBound.
+const AlgoAES256SIVTypeBound = "AES256_SIV_TB"
 
 // Type is the native type of an encrypted scalar, recorded so decryption
 // can restore it. TypeNone marks a whole-file tag, which has none.
@@ -73,6 +117,18 @@ type Tag struct {
 
 	// Type is the original scalar type, or TypeNone for a whole-file tag.
 	Type Type
+
+	// TypeBound reports whether Type is itself part of what this tag's
+	// ciphertext authenticates (AlgoAES256SIVTypeBound), as opposed to
+	// separate, unauthenticated plaintext metadata sitting next to the
+	// ciphertext (the legacy AlgoAES256SIV value form). Always false for
+	// a whole-file tag, which carries no type field to bind in the first
+	// place. A caller reconstructing the AAD a value's ciphertext was
+	// encrypted under must include Type in it when this is true, and
+	// must not when it's false — using the wrong one either way fails
+	// authentication, since AAD mismatches are indistinguishable from a
+	// wrong key or tampered ciphertext.
+	TypeBound bool
 }
 
 const (
@@ -117,8 +173,14 @@ func Encode(ciphertext []byte, version int) string {
 // EncodeValue wraps ciphertext for a single scalar, recording the key
 // version that produced it (spec 11) and the type the plaintext had so
 // Decrypt can restore it (spec 03 AC-3.1, AC-3.2).
+//
+// Always uses AlgoAES256SIVTypeBound (spec 03 AC-3.10): every value tag
+// this build produces binds its type field into the ciphertext's AAD.
+// The caller must construct that AAD to match — see internal/siv.AAD and
+// Tag.TypeBound's doc comment — or the ciphertext it just produced won't
+// authenticate against its own tag.
 func EncodeValue(ciphertext []byte, version int, t Type) string {
-	return fmt.Sprintf("%s%s,key:%d,data:%s,type:%s%s", prefix, AlgoAES256SIV, version, base64.StdEncoding.EncodeToString(ciphertext), t, suffix)
+	return fmt.Sprintf("%s%s,key:%d,data:%s,type:%s%s", prefix, AlgoAES256SIVTypeBound, version, base64.StdEncoding.EncodeToString(ciphertext), t, suffix)
 }
 
 // Decode parses a tag and returns just the ciphertext, ignoring its
@@ -154,7 +216,13 @@ func Parse(raw string) (Tag, error) {
 		return Tag{}, fmt.Errorf("%w: expected \"ALGO,key:<version>,data:<base64>\"", ErrMalformed)
 	}
 	algo := fields[0]
-	if algo != AlgoAES256SIV {
+	var typeBound bool
+	switch algo {
+	case AlgoAES256SIV:
+		typeBound = false
+	case AlgoAES256SIVTypeBound:
+		typeBound = true
+	default:
 		return Tag{}, fmt.Errorf("%w: %q", ErrUnsupportedAlgo, algo)
 	}
 	rest := fields[1:]
@@ -194,7 +262,14 @@ func Parse(raw string) (Tag, error) {
 		if parsed.Type = Type(value); !parsed.Type.Valid() {
 			return Tag{}, fmt.Errorf("%w: %q", ErrUnsupportedType, value)
 		}
+		parsed.TypeBound = typeBound
 		rest = rest2
+	} else if typeBound {
+		// AlgoAES256SIVTypeBound exists specifically to bind a type
+		// field; a whole-file-shaped tag naming it anyway has nothing to
+		// bind and is malformed, not something to quietly accept as if
+		// it were the plain AlgoAES256SIV whole-file form.
+		return Tag{}, fmt.Errorf("%w: %q requires a \"type:\" field", ErrMalformed, AlgoAES256SIVTypeBound)
 	}
 	if len(rest) > 0 {
 		return Tag{}, fmt.Errorf("%w: unexpected trailing field %q", ErrMalformed, rest[0])

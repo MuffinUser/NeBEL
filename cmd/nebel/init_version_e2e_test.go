@@ -87,8 +87,8 @@ func TestInitVersionRecoversContentFromBeforeRotation(t *testing.T) {
 	}
 
 	// The v2 key registered earlier must still be there.
-	if _, err := runInExpectingError(t, clone, pathEnv, "git", "config", "--local", "--get", "filter.nebel.key2"); err != nil {
-		t.Errorf("init --version 1 disturbed the already-registered v2 key: %v", err)
+	if _, ok := registeredKeyValue(t, clone, pathEnv, 2); !ok {
+		t.Error("init --version 1 disturbed the already-registered v2 key")
 	}
 }
 
@@ -104,7 +104,7 @@ func TestInitVersionUnknownFails(t *testing.T) {
 	if err == nil {
 		t.Fatalf("nebel init --version 99: want an error, got success:\n%s", out)
 	}
-	if _, ok, kerr := getLocalConfig(t, clone, pathEnv, "filter.nebel.key99"); kerr == nil && ok {
+	if _, ok := registeredKeyValue(t, clone, pathEnv, 99); ok {
 		t.Error("init --version 99 registered a key for a version that doesn't exist")
 	}
 }

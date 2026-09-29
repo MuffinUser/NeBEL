@@ -25,7 +25,42 @@ var (
 	// ErrNotScalar is returned when a path resolves to a mapping or
 	// sequence rather than a single value.
 	ErrNotScalar = errors.New("format: path does not resolve to a scalar")
+
+	// ErrAmbiguousPath is returned when a configured path selects more
+	// than one distinct location in the same document. Two ways this
+	// happens: a literal key containing a dot collides with the
+	// equivalent nested path — dot notation can't tell "a.b" the flat key
+	// from "a" containing "b" apart, and a dot inside a key can't be
+	// escaped (ParsePath's doc comment) — or an outright duplicate key at
+	// the same nesting level (JSON's streaming decoder does not reject
+	// these the way go-yaml's parser does). Locate's traversal can only
+	// ever resolve to one of them; picking one silently, as earlier
+	// versions did, could protect the wrong (or only one) of several
+	// values while reporting success — the same silent-failure concern
+	// ErrNotFound already guards for a path that resolves to nothing.
+	ErrAmbiguousPath = errors.New("format: path is ambiguous")
 )
+
+// checkUnambiguous reports ErrAmbiguousPath if path selects more than one
+// leaf in src (see ErrAmbiguousPath), by cross-checking against h.Leaves,
+// which — unlike a targeted descent — visits every literal key in the
+// document and so surfaces a collision a single-path lookup never would.
+func checkUnambiguous(h Handler, src []byte, path string) error {
+	leaves, err := h.Leaves(src)
+	if err != nil {
+		return err
+	}
+	matches := 0
+	for _, leaf := range leaves {
+		if leaf.Path == path {
+			matches++
+		}
+	}
+	if matches > 1 {
+		return fmt.Errorf("%w: %q matches %d different values", ErrAmbiguousPath, path, matches)
+	}
+	return nil
+}
 
 // Span is one located scalar: where it sits in the source, and what it is.
 type Span struct {

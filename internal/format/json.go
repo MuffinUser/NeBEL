@@ -21,9 +21,12 @@ type jsonHandler struct{}
 // possible: json.Unmarshal would discard the offsets, and re-marshalling
 // would normalize key order, indentation and number formatting across the
 // whole document.
-func (jsonHandler) Locate(src []byte, path string) (Span, error) {
+func (h jsonHandler) Locate(src []byte, path string) (Span, error) {
 	steps, err := ParsePath(path)
 	if err != nil {
+		return Span{}, err
+	}
+	if err := checkUnambiguous(h, src, path); err != nil {
 		return Span{}, err
 	}
 

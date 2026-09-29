@@ -5,6 +5,7 @@ package format
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -28,9 +29,12 @@ type yamlHandler struct{}
 // resulting span back to real offsets in src, so Locate still splices
 // over the actual bytes on disk. When src has no "\r\n" at all, the map
 // is the identity and this is exactly the original behavior.
-func (yamlHandler) Locate(src []byte, path string) (Span, error) {
+func (h yamlHandler) Locate(src []byte, path string) (Span, error) {
 	steps, err := ParsePath(path)
 	if err != nil {
+		return Span{}, err
+	}
+	if err := checkUnambiguous(h, src, path); err != nil {
 		return Span{}, err
 	}
 
@@ -58,12 +62,31 @@ func (yamlHandler) Locate(src []byte, path string) (Span, error) {
 		}
 	}
 
+	if _, isBlock := node.(*ast.LiteralNode); isBlock {
+		return Span{}, fmt.Errorf("%w: %q", ErrBlockScalarUnsupported, path)
+	}
 	scalar, ok := node.(ast.ScalarNode)
 	if !ok {
 		return Span{}, fmt.Errorf("%w: %q is a %s", ErrNotScalar, path, node.Type())
 	}
 	return yamlSpan(src, m, scalar.GetToken(), path)
 }
+
+// ErrBlockScalarUnsupported is returned when a configured path resolves to
+// a literal (|) or folded (>) block scalar.
+//
+// *ast.LiteralNode (go-yaml's AST type for both styles) wraps two tokens:
+// a header token holding just the "|" or ">" indicator itself, and a
+// separate Value token holding the actual decoded multi-line text.
+// *ast.LiteralNode satisfies ast.ScalarNode, and its GetToken() returns
+// only the header — so treating it as an ordinary scalar, as this handler
+// did before this check existed, would locate and splice a ciphertext tag
+// over the single header character, corrupting the document instead of
+// protecting the secret underneath it. This was found while fixing P02,
+// not part of the audit that motivated it; there is no format-side
+// handling for these styles to fall back on, so refusing them outright is
+// the safe behavior until they're properly supported.
+var ErrBlockScalarUnsupported = errors.New("format: literal (|) and folded (>) block scalars are not supported as mode: value fields")
 
 // crlfMap translates byte offsets computed against a CRLF-normalized copy
 // of a source buffer (every "\r\n" replaced by "\n") back to offsets in
@@ -179,10 +202,36 @@ func yamlSpan(src []byte, m crlfMap, tk *token.Token, path string) (Span, error)
 }
 
 // scalarText strips the trivia the lexer folds into a token's Origin: the
-// surrounding whitespace, and any comment that follows the value on the
-// same line.
+// surrounding whitespace, and — for a plain (unquoted) scalar only — any
+// comment that follows the value on the same line.
+//
+// A quoted scalar's Origin is, verified empirically against goccy/go-yaml,
+// always exactly the quoted literal verbatim (opening quote through
+// closing quote), with no trailing trivia of any kind ever folded in —
+// not a following comment, not trailing whitespace, regardless of what
+// follows it in the source. Searching it for " #" would instead find one
+// *inside* the quotes, wrongly truncating a value like `"abc # geheim"`
+// to `"abc` and leaving the rest (`# geheim"`) as literal plaintext next
+// to the encrypted tag (audit 2026-09-29, P02) — so a quoted scalar's
+// trimmed Origin is returned as-is, unsearched.
+//
+// A plain scalar's Origin can never legitimately contain " #" as its own
+// content in the first place: the YAML lexer itself treats " #" as the
+// start of a comment and stops accumulating a plain scalar's Origin right
+// there, whatever the author intended. The search below is therefore a
+// no-op in practice for a well-formed plain scalar token; it is kept as
+// the one non-quoted path through this function, rather than special-
+// cased away, so a lexer that ever did fold trailing trivia in for some
+// plain-scalar edge case would still be handled instead of silently
+// trusted.
 func scalarText(origin string) string {
 	text := strings.TrimSpace(origin)
+	if text == "" {
+		return text
+	}
+	if text[0] == '"' || text[0] == '\'' {
+		return text
+	}
 	if hash := strings.Index(text, " #"); hash >= 0 {
 		text = strings.TrimRight(text[:hash], " \t")
 	}
@@ -299,6 +348,11 @@ func (yamlHandler) Leaves(src []byte) ([]Leaf, error) {
 			for i, item := range n.Values {
 				walk(item, indexPath(path, i))
 			}
+		case *ast.LiteralNode:
+			// A block scalar (|, >) is never offered: see
+			// ErrBlockScalarUnsupported. This case must come before the
+			// ast.ScalarNode one below, which *ast.LiteralNode also
+			// satisfies but would report the wrong token.
 		case ast.ScalarNode:
 			// A scalar at the document root has no path to address it by.
 			if path != "" {

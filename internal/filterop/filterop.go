@@ -12,6 +12,7 @@ package filterop
 import (
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/MuffinUser/nebel/internal/config"
 	"github.com/MuffinUser/nebel/internal/format"
@@ -30,9 +31,24 @@ type Keyring map[int][]byte
 // this machine's keyring does not hold.
 var ErrKeyVersionMissing = errors.New("filterop: key version not registered locally")
 
-// Clean encrypts input if filePath matches a mode: file rule; otherwise (no
-// matching rule, or the value is already encrypted) it returns input
-// unchanged.
+// ErrNoMatchingRule is returned when Clean or Smudge is invoked for a path
+// that no rule in .nebel.yaml matches. Git only calls this filter for a
+// path .gitattributes marks filter=nebel, so reaching this case means
+// .gitattributes and .nebel.yaml disagree about that path — most often
+// because a bare pattern like "*.env" matches recursively in
+// .gitattributes but, per doublestar's semantics (see config.Rule.Files),
+// only at the depth it's written at. Passing content through unchanged
+// here, as earlier versions did, would either commit it as plaintext
+// (Clean) or leave the mismatch invisible (Smudge); erroring instead
+// blocks the git operation, since filter.nebel.required is set to true.
+var ErrNoMatchingRule = errors.New("filterop: path has git attribute filter=nebel but no rule in .nebel.yaml matches it — check .gitattributes and .nebel.yaml for a pattern mismatch")
+
+// Clean encrypts input if filePath matches a mode: file rule; if the value
+// is already encrypted it returns input unchanged. A filePath that matches
+// no rule at all is ErrNoMatchingRule: git only invokes this filter for a
+// path .gitattributes marks filter=nebel, so a non-match here means
+// .gitattributes and .nebel.yaml disagree about that path, not that the
+// path is legitimately unmanaged.
 //
 // filePath must be the file's path relative to the repository root — it is
 // both the rule-matching key and part of the AAD binding the ciphertext to
@@ -57,7 +73,7 @@ var ErrKeyVersionMissing = errors.New("filterop: key version not registered loca
 func Clean(cfg *config.Config, keyring Keyring, filePath string, input []byte) ([]byte, error) {
 	rule, ok := cfg.MatchRule(filePath)
 	if !ok {
-		return input, nil
+		return nil, fmt.Errorf("%w: %s", ErrNoMatchingRule, filePath)
 	}
 	version := cfg.CurrentVersion()
 	key, haveKey := keyring[version]
@@ -102,7 +118,9 @@ type Skipped struct {
 // at all passes through unchanged (AC-6.7 — e.g. a file not yet migrated).
 // A value that *is* tagged but fails to parse or authenticate is a genuine
 // corruption or tampering signal and is reported as an error rather than
-// smudged into a wrong-but-plausible plaintext (AC-6.9).
+// smudged into a wrong-but-plausible plaintext (AC-6.9). A filePath that
+// matches no rule at all is ErrNoMatchingRule, for the same reason as in
+// Clean: git would not have invoked this filter for it otherwise.
 //
 // Unlike Clean, Smudge selects its key by the value's own tag-declared
 // version (AC-6.13), not the config's current version. A well-formed tag
@@ -116,7 +134,7 @@ type Skipped struct {
 func Smudge(cfg *config.Config, keyring Keyring, filePath string, input []byte) ([]byte, []Skipped, error) {
 	rule, ok := cfg.MatchRule(filePath)
 	if !ok {
-		return input, nil, nil
+		return nil, nil, fmt.Errorf("%w: %s", ErrNoMatchingRule, filePath)
 	}
 	if rule.Mode == config.ModeValue {
 		return smudgeValues(rule, keyring, filePath, input)
@@ -172,7 +190,12 @@ func cleanValues(rule config.Rule, version int, key []byte, haveKey bool, filePa
 			return nil, fmt.Errorf("%w: current version %d — run `nebel init`", ErrKeyVersionMissing, version)
 		}
 
-		ciphertext, err := siv.Encrypt(key, []byte(span.Value), siv.AAD(siv.ModeValue, filePath, field))
+		// The type travels in the tag as plaintext metadata, not inside
+		// the ciphertext — so it's bound into the AAD instead, exactly
+		// like the file/field path components, otherwise it could be
+		// swapped (type:str -> type:bool) without needing the key at all
+		// (audit 2026-09-29, P05; spec 03 AC-3.10).
+		ciphertext, err := siv.Encrypt(key, []byte(span.Value), siv.AAD(siv.ModeValue, filePath, field, string(span.Type)))
 		if err != nil {
 			return nil, fmt.Errorf("filterop: clean %s at %s: %w", filePath, field, err)
 		}
@@ -226,14 +249,65 @@ func smudgeValues(rule config.Rule, keyring Keyring, filePath string, input []by
 			continue
 		}
 
-		plaintext, err := siv.Decrypt(key, parsed.Ciphertext, siv.AAD(siv.ModeValue, filePath, field))
+		// A legacy (pre-P05-fix) tag's ciphertext was never authenticated
+		// with its type in the AAD to begin with — reconstructing it with
+		// the type included here would fail authentication against a
+		// perfectly legitimate, untampered legacy tag, exactly as it
+		// would against a tampered one. Only a tag using
+		// AlgoAES256SIVTypeBound (Tag.TypeBound) was encrypted that way.
+		aad := siv.AAD(siv.ModeValue, filePath, field)
+		if parsed.TypeBound {
+			aad = siv.AAD(siv.ModeValue, filePath, field, string(parsed.Type))
+		}
+		plaintext, err := siv.Decrypt(key, parsed.Ciphertext, aad)
 		if err != nil {
+			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, err)
+		}
+		// Stopgap for a legacy tag's still-unauthenticated type field
+		// (parsed.TypeBound == false, see the AAD selection above): a type
+		// flip there needs no key, and Render writes TypeInt/TypeFloat/
+		// TypeBool out unquoted with no validation of its own. Refusing a
+		// plaintext that isn't a valid literal for its claimed type won't
+		// catch every flip (e.g. a string that happens to read "false"
+		// stays ambiguous either way — see
+		// TestSmudgeValuesLegacyTagTypeStillUnauthenticated), but it keeps
+		// a successful flip from unquoting arbitrary attacker-controlled
+		// text, which for a crafted value could otherwise inject
+		// structure into the surrounding document. A type-bound tag can't
+		// reach this in practice (its type can't change without failing
+		// the Decrypt above), so this never rejects legitimate content.
+		if err := validTypeLiteral(string(plaintext), parsed.Type); err != nil {
 			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, err)
 		}
 		edits = append(edits, format.Edit{Span: span, Text: handler.Render(string(plaintext), parsed.Type)})
 	}
 	out, err := splice(input, edits, "smudge", filePath)
 	return out, skipped, err
+}
+
+// ErrInvalidTypeLiteral is returned when a decrypted value isn't a
+// syntactically valid literal for its tag's claimed non-string type — see
+// validTypeLiteral.
+var ErrInvalidTypeLiteral = errors.New("filterop: decrypted value is not a valid literal for its claimed type")
+
+// validTypeLiteral rejects a plaintext that doesn't look like a genuine
+// int/float/bool literal before it gets rendered unquoted. TypeStr always
+// passes: Render quotes it, so whatever bytes it contains stay inert data
+// rather than becoming unquoted source syntax.
+func validTypeLiteral(value string, t tag.Type) error {
+	var err error
+	switch t {
+	case tag.TypeBool:
+		_, err = strconv.ParseBool(value)
+	case tag.TypeInt:
+		_, err = strconv.ParseInt(value, 10, 64)
+	case tag.TypeFloat:
+		_, err = strconv.ParseFloat(value, 64)
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %q is not a valid %s", ErrInvalidTypeLiteral, value, t)
+	}
+	return nil
 }
 
 func splice(input []byte, edits []format.Edit, op, filePath string) ([]byte, error) {

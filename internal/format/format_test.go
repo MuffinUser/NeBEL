@@ -132,6 +132,115 @@ func TestLocate(t *testing.T) {
 	}
 }
 
+// Regression test for the 2026-09-29 audit's P02: a quoted YAML scalar
+// containing a literal " #" (space-hash) inside the quotes must locate as
+// its full quoted literal, not be truncated at the in-quote "#" as if it
+// were a trailing comment. Splicing over a truncated span, as the pre-fix
+// code did, would leave the untruncated remainder as literal plaintext in
+// the git blob right next to the encrypted tag — confirmed directly
+// against the pre-fix code (see the commit message).
+func TestLocateQuotedScalarWithHash(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		src       string
+		wantRaw   string
+		wantValue string
+	}{
+		{"double-quoted, hash inside, no trailing comment",
+			`password: "abc # geheim"` + "\n",
+			`"abc # geheim"`, "abc # geheim"},
+		{"single-quoted, hash inside, no trailing comment",
+			`password: 'abc # geheim'` + "\n",
+			`'abc # geheim'`, "abc # geheim"},
+		{"double-quoted, hash inside, plus a real trailing comment",
+			`password: "abc # geheim" # a real comment` + "\n",
+			`"abc # geheim"`, "abc # geheim"},
+		{"double-quoted, hash inside, no trailing newline",
+			`password: "abc # geheim"`,
+			`"abc # geheim"`, "abc # geheim"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, err := For("c.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			span, err := h.Locate([]byte(tt.src), "password")
+			if err != nil {
+				t.Fatalf("Locate: %v", err)
+			}
+			if got := tt.src[span.Start:span.End]; got != tt.wantRaw {
+				t.Errorf("span covers %q, want %q", got, tt.wantRaw)
+			}
+			if span.Value != tt.wantValue {
+				t.Errorf("Value = %q, want %q", span.Value, tt.wantValue)
+			}
+
+			// The real-world consequence: splicing an encrypted tag over
+			// this span must leave nothing of the secret in the result.
+			const tagText = `"ENC[AES256_SIV,data:AAAA,type:str]"`
+			out, err := Splice([]byte(tt.src), []Edit{{Span: span, Text: tagText}})
+			if err != nil {
+				t.Fatalf("Splice: %v", err)
+			}
+			if strings.Contains(string(out), "geheim") {
+				t.Errorf("spliced output still contains plaintext: %q", out)
+			}
+		})
+	}
+}
+
+// A plain (unquoted) scalar's own trailing comment must still be stripped
+// exactly as before — this fix must not regress the case scalarText was
+// originally written for.
+func TestLocatePlainScalarWithTrailingComment(t *testing.T) {
+	h, err := For("c.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := "password: abc # a real comment\n"
+	span, err := h.Locate([]byte(src), "password")
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if got := src[span.Start:span.End]; got != "abc" {
+		t.Errorf("span covers %q, want %q", got, "abc")
+	}
+}
+
+// Regression test for a corruption bug found while fixing P02: go-yaml's
+// AST represents a literal (|) or folded (>) block scalar with a header
+// token (just the "|"/">" indicator) separate from its actual content
+// token, and *ast.LiteralNode.GetToken() — which Locate used
+// unconditionally — returns only the header. Before this guard, Locate
+// would splice a ciphertext tag over the single header character,
+// destroying the document instead of protecting the secret beneath it.
+func TestLocateRejectsBlockScalars(t *testing.T) {
+	for _, tt := range []struct{ name, src string }{
+		{"literal block", "password: |\n  line one\n  line two\n"},
+		{"folded block", "password: >\n  line one\n  line two\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, err := For("c.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.Locate([]byte(tt.src), "password"); !errors.Is(err, ErrBlockScalarUnsupported) {
+				t.Errorf("Locate() error = %v, want %v", err, ErrBlockScalarUnsupported)
+			}
+
+			leaves, err := h.Leaves([]byte(tt.src))
+			if err != nil {
+				t.Fatalf("Leaves: %v", err)
+			}
+			for _, leaf := range leaves {
+				if leaf.Path == "password" {
+					t.Errorf("Leaves() offered a block scalar field: %+v", leaf)
+				}
+			}
+		})
+	}
+}
+
 // The CRLF regression: go-yaml's own Line/Column tracking miscounts
 // against raw "\r\n" — a real-world case, not a hypothetical one, since
 // Windows checking out a repo with core.autocrlf on reintroduces "\r"
@@ -319,6 +428,57 @@ func TestLocateRejectsNonScalar(t *testing.T) {
 				t.Errorf("Locate(%q) error = %v, want %v", tt.path, err, ErrNotScalar)
 			}
 		})
+	}
+}
+
+// Regression tests for the 2026-09-29 audit's P03 and P04: a configured
+// path that resolves to more than one distinct value in the same document
+// must be refused, not silently resolved to whichever candidate a
+// targeted descent happens to reach first.
+func TestLocateRejectsAmbiguousPath(t *testing.T) {
+	for _, tt := range []struct {
+		name, file, src, path string
+	}{
+		// P03: a literal key containing a dot ("a.b") collides with the
+		// equivalent nested path ("a" containing "b") — dot notation
+		// can't tell them apart. Before the fix, Locate always resolved
+		// to the nested value ("decoy"), silently leaving the flat key's
+		// "secret" unencrypted while reporting success.
+		{"json dotted key collides with nested path", "c.json", `{"a.b":"secret","a":{"b":"decoy"}}`, "a.b"},
+		{"yaml dotted key collides with nested path", "c.yaml", "\"a.b\": secret\na:\n  b: decoy\n", "a.b"},
+
+		// P04: encoding/json's streaming decoder does not reject a
+		// duplicate object key the way go-yaml's parser does (see
+		// TestYAMLParserRejectsDuplicateKeys) — before the fix,
+		// descendObject returned the first occurrence's span, leaving
+		// the second occurrence (which, per encoding/json's own
+		// map-unmarshal semantics, most consumers would treat as the
+		// effective value) in plaintext.
+		{"json duplicate key", "c.json", `{"password":"eins","password":"zwei"}`, "password"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, err := For(tt.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.Locate([]byte(tt.src), tt.path); !errors.Is(err, ErrAmbiguousPath) {
+				t.Errorf("Locate(%q) error = %v, want %v", tt.path, err, ErrAmbiguousPath)
+			}
+		})
+	}
+}
+
+// Documents, rather than fixes, existing behavior: go-yaml's parser
+// already rejects an outright duplicate mapping key at parse time, unlike
+// encoding/json's streaming decoder (see TestLocateRejectsAmbiguousPath's
+// "json duplicate key" case) — so YAML needed no equivalent fix for P04.
+func TestYAMLParserRejectsDuplicateKeys(t *testing.T) {
+	h, err := For("c.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Locate([]byte("password: eins\npassword: zwei\n"), "password"); err == nil {
+		t.Error("Locate() on a YAML document with a duplicate key: want an error, got nil")
 	}
 }
 

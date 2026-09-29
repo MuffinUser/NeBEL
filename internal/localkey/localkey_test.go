@@ -5,8 +5,11 @@ package localkey
 
 import (
 	"bytes"
+	"encoding/base64"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -65,11 +68,21 @@ func TestSetGetRoundTrip(t *testing.T) {
 	}
 }
 
-// version 1 is stored under the unsuffixed "filter.nebel.key" name — the
-// same one every clone created before key rotation existed already reads
-// and writes — so an upgraded binary keeps recognizing a key an older
-// binary registered.
-func TestVersion1UsesLegacyConfigName(t *testing.T) {
+// Regression test for the 2026-09-29 audit's P06: Set must never put the
+// key anywhere `git config` can reach, since writing it there is exactly
+// what required exposing it as a subprocess argument in the first place.
+// This directly proves the exposure path is closed: the base64 key must
+// not appear anywhere in .git/config's raw file content after Set.
+//
+// The audit's actual concern — the key briefly appearing in a process's
+// argument list, visible to another local user via /proc/<pid>/cmdline —
+// isn't itself observable from a Go test, since the git subprocess that
+// used to receive it exits before a test could inspect its argv. Proving
+// the key no longer ends up as a plain git-config value at all is the
+// most direct available proxy: getting it there is exactly what forced
+// passing it as a `git config` argument to begin with, so its absence
+// here means that argument was never made.
+func TestSetNeverWritesToGitConfig(t *testing.T) {
 	dir := newTempRepo(t)
 	chdir(t, dir)
 
@@ -78,14 +91,69 @@ func TestVersion1UsesLegacyConfigName(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	cmd := exec.Command("git", "config", "--local", "--get", "filter.nebel.key")
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	configPath := filepath.Join(dir, ".git", "config")
+	raw, err := os.ReadFile(configPath)
 	if err != nil {
-		t.Fatalf("git config --get filter.nebel.key: %v", err)
+		t.Fatalf("reading .git/config: %v", err)
 	}
-	if len(out) == 0 {
-		t.Error("version 1's key was not stored under filter.nebel.key")
+	encoded := base64.StdEncoding.EncodeToString(key)
+	if strings.Contains(string(raw), encoded) {
+		t.Errorf(".git/config contains the key after Set:\n%s", raw)
+	}
+	if strings.Contains(string(raw), "filter.nebel.key") {
+		t.Errorf(".git/config contains a filter.nebel.key entry after Set:\n%s", raw)
+	}
+}
+
+// The key file Set writes to must be readable only by its owner —
+// tighter than .git/config's ambient permissions, and a direct answer to
+// a related "harden local key storage" suggestion from the same audit.
+func TestKeyFileHasOwnerOnlyPermissions(t *testing.T) {
+	dir := newTempRepo(t)
+	chdir(t, dir)
+
+	if err := Set(1, bytes.Repeat([]byte{0x11}, 64)); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(dir, ".git", keyFileName))
+	if err != nil {
+		t.Fatalf("stat key file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("key file permissions = %o, want 0600", perm)
+	}
+}
+
+// Backward compatibility: a version registered the old way, directly in
+// local git config (as every clone did before this fix), must still be
+// found by Get and All — an existing clone must keep working without
+// needing to re-run `nebel init` just because this shipped.
+func TestGetAndAllFallBackToLegacyGitConfig(t *testing.T) {
+	dir := newTempRepo(t)
+	chdir(t, dir)
+
+	key := bytes.Repeat([]byte{0x22}, 64)
+	cmd := exec.Command("git", "config", "--local", "filter.nebel.key", base64.StdEncoding.EncodeToString(key))
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config: %v\n%s", err, out)
+	}
+
+	got, ok, err := Get(1)
+	if err != nil || !ok {
+		t.Fatalf("Get(1) for a legacy-registered key: ok=%v err=%v", ok, err)
+	}
+	if !bytes.Equal(got, key) {
+		t.Errorf("Get(1) = %x, want %x", got, key)
+	}
+
+	all, err := All()
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if !bytes.Equal(all[1], key) {
+		t.Errorf("All()[1] = %x, want %x", all[1], key)
 	}
 }
 

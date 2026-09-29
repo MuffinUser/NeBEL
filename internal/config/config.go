@@ -85,6 +85,14 @@ var (
 	// encrypt list, which it would ignore — a sign the author expected
 	// per-value behaviour and would not get it.
 	ErrFieldsOnFileRule = errors.New("config: mode: file rule must not list fields")
+
+	// ErrInvalidPattern is returned when a rule's Files glob is not valid
+	// doublestar syntax. Rejecting it here, rather than at match time,
+	// matters because MatchRule discards doublestar.Match's error (its
+	// bool-only signature has no room for one) — an invalid pattern that
+	// slipped past this check would silently behave as "never matches"
+	// instead of surfacing the typo.
+	ErrInvalidPattern = errors.New("config: invalid glob pattern")
 )
 
 // SaltBytes decodes Salt from base64.
@@ -114,6 +122,9 @@ func (c *Config) CurrentVersion() int {
 // the one machine that happens to stage that file.
 func (c *Config) Validate() error {
 	for _, r := range c.Rules {
+		if !doublestar.ValidatePattern(r.Files) {
+			return fmt.Errorf("%w: rule %q", ErrInvalidPattern, r.Files)
+		}
 		switch r.Mode {
 		case ModeFile:
 			if len(r.Encrypt) > 0 {

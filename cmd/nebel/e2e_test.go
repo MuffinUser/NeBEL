@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -90,6 +91,37 @@ func runInExpectingError(t *testing.T, dir, pathEnv, name string, args ...string
 	cmd.Env = append(os.Environ(), "PATH="+pathEnv)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// registeredKeyValue returns the raw stored value (a base64-encoded key)
+// for version in dir's local key storage, treating nebel as a black box
+// rather than assuming which of its two storage locations actually holds
+// it: the key file it writes to as of the 2026-09-29 audit's P06 fix
+// (internal/localkey's keyFileName), checked first, falling back to the
+// legacy git-config location a version could still be registered under —
+// mirroring internal/localkey.Get's own precedence, so these tests keep
+// working regardless of which one a given key landed in.
+func registeredKeyValue(t *testing.T, dir, pathEnv string, version int) (string, bool) {
+	t.Helper()
+	commonDir := strings.TrimSpace(runIn(t, dir, pathEnv, "git", "rev-parse", "--git-common-dir"))
+	if data, err := os.ReadFile(filepath.Join(dir, commonDir, "nebel-keys")); err == nil {
+		prefix := fmt.Sprintf("%d=", version)
+		for _, line := range strings.Split(string(data), "\n") {
+			if val, ok := strings.CutPrefix(line, prefix); ok {
+				return val, true
+			}
+		}
+	}
+
+	name := "filter.nebel.key"
+	if version != 1 {
+		name = fmt.Sprintf("filter.nebel.key%d", version)
+	}
+	val, ok, err := getLocalConfig(t, dir, pathEnv, name)
+	if err != nil {
+		return "", false
+	}
+	return val, ok
 }
 
 // initWithPassword runs `nebel init`, supplying the password through
@@ -233,14 +265,14 @@ func TestJoinWithWrongPasswordFails(t *testing.T) {
 	repo := newTestRepo(t, pathEnv)
 	initWithPassword(t, repo, pathEnv, "correct-password")
 
-	keyBefore := runIn(t, repo, pathEnv, "git", "config", "--local", "--get", "filter.nebel.key")
+	keyBefore, _ := registeredKeyValue(t, repo, pathEnv, 1)
 
 	out, err := runInitWith(t, repo, pathEnv, []string{passwordEnv + "=wrong-password"}, "")
 	if err == nil {
 		t.Fatalf("nebel init with wrong password: want an error, got success: %s", out)
 	}
 
-	keyAfter := runIn(t, repo, pathEnv, "git", "config", "--local", "--get", "filter.nebel.key")
+	keyAfter, _ := registeredKeyValue(t, repo, pathEnv, 1)
 	if keyBefore != keyAfter {
 		t.Error("wrong password changed the registered local key")
 	}

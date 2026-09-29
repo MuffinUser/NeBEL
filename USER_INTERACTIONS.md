@@ -247,7 +247,7 @@ leaked, change the underlying secrets too, not just the password.
 | Command | Who runs it | When |
 |---|---|---|
 | `nebel init [password]` | Repo owner (bootstrap) / every other clone / CI | Once per person/machine, and once per repo |
-| `nebel add <glob> [--field <path>]` | Any dev | When a new secret file or field is introduced |
+| `nebel add file <glob>` / `nebel add field <file> [path...]` | Any dev | When a new secret file or field is introduced |
 | `nebel status` | Any dev / CI | Ad hoc debugging, or as a CI gate |
 | `nebel rotate` | Any dev with a currently valid key | When the shared password needs to change (leak, offboarding, routine hygiene) |
 

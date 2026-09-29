@@ -218,7 +218,7 @@ func ensureGitattributes(root string) error {
 // glob to the nebel filter, unless that exact line is already present.
 func addGitattributesPattern(root, glob string) error {
 	path := filepath.Join(root, gitattributesName)
-	line := fmt.Sprintf("%s filter=nebel", glob)
+	line := fmt.Sprintf("%s filter=nebel", escapeGitattributesPattern(glob))
 
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -240,4 +240,26 @@ func addGitattributesPattern(root, glob string) error {
 		return fmt.Errorf("writing %s: %w", gitattributesName, err)
 	}
 	return nil
+}
+
+// escapeGitattributesPattern escapes the characters gitattributes' line
+// syntax gives special meaning to, so a glob written verbatim into a
+// pattern/attribute line still means what the caller intended:
+//   - a leading '#' starts a comment, and a leading '!' negates a
+//     pattern — either would silently turn the whole line into something
+//     other than a filter assignment for glob;
+//   - the line's fields are split on whitespace, so an embedded space
+//     would attach the rest of glob to the "filter=nebel" attribute
+//     instead of the pattern, leaving the intended file unmatched even
+//     though the command reports success.
+//
+// This does not touch glob metacharacters (*, ?, [, ], \) themselves —
+// Rule.Files is intentionally a doublestar glob (see its doc comment),
+// and escaping those would change what the pattern matches instead of
+// merely how the line is parsed.
+func escapeGitattributesPattern(glob string) string {
+	if strings.HasPrefix(glob, "#") || strings.HasPrefix(glob, "!") {
+		glob = `\` + glob
+	}
+	return strings.ReplaceAll(glob, " ", `\ `)
 }

@@ -5,6 +5,7 @@ package filterop
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/MuffinUser/nebel/internal/config"
@@ -101,23 +102,23 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-// A file that matches no rule passes through unchanged on both operations.
-func TestUnmatchedFilePassesThrough(t *testing.T) {
+// A path git invokes the filter for (it always names one filePath argument
+// per invocation) but that no rule matches is a .gitattributes/.nebel.yaml
+// mismatch, not a legitimately unmanaged file — git would not have called
+// clean/smudge for it otherwise. Passing content through here would either
+// commit it as plaintext (Clean) or hide the mismatch (Smudge), so both
+// report ErrNoMatchingRule instead.
+func TestUnmatchedFileErrors(t *testing.T) {
 	input := []byte("plain content")
-	cleaned, err := Clean(testConfig(), testKeyring, "README.md", input)
-	if err != nil {
-		t.Fatalf("Clean: %v", err)
-	}
-	if !bytes.Equal(cleaned, input) {
-		t.Errorf("Clean() on an unmatched file changed the content: %q", cleaned)
+
+	_, err := Clean(testConfig(), testKeyring, "README.md", input)
+	if !errors.Is(err, ErrNoMatchingRule) {
+		t.Errorf("Clean() error = %v, want %v", err, ErrNoMatchingRule)
 	}
 
-	smudged, _, err := Smudge(testConfig(), testKeyring, "README.md", input)
-	if err != nil {
-		t.Fatalf("Smudge: %v", err)
-	}
-	if !bytes.Equal(smudged, input) {
-		t.Errorf("Smudge() on an unmatched file changed the content: %q", smudged)
+	_, _, err = Smudge(testConfig(), testKeyring, "README.md", input)
+	if !errors.Is(err, ErrNoMatchingRule) {
+		t.Errorf("Smudge() error = %v, want %v", err, ErrNoMatchingRule)
 	}
 }
 

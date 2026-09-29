@@ -30,9 +30,24 @@ type Keyring map[int][]byte
 // this machine's keyring does not hold.
 var ErrKeyVersionMissing = errors.New("filterop: key version not registered locally")
 
-// Clean encrypts input if filePath matches a mode: file rule; otherwise (no
-// matching rule, or the value is already encrypted) it returns input
-// unchanged.
+// ErrNoMatchingRule is returned when Clean or Smudge is invoked for a path
+// that no rule in .nebel.yaml matches. Git only calls this filter for a
+// path .gitattributes marks filter=nebel, so reaching this case means
+// .gitattributes and .nebel.yaml disagree about that path — most often
+// because a bare pattern like "*.env" matches recursively in
+// .gitattributes but, per doublestar's semantics (see config.Rule.Files),
+// only at the depth it's written at. Passing content through unchanged
+// here, as earlier versions did, would either commit it as plaintext
+// (Clean) or leave the mismatch invisible (Smudge); erroring instead
+// blocks the git operation, since filter.nebel.required is set to true.
+var ErrNoMatchingRule = errors.New("filterop: path has git attribute filter=nebel but no rule in .nebel.yaml matches it — check .gitattributes and .nebel.yaml for a pattern mismatch")
+
+// Clean encrypts input if filePath matches a mode: file rule; if the value
+// is already encrypted it returns input unchanged. A filePath that matches
+// no rule at all is ErrNoMatchingRule: git only invokes this filter for a
+// path .gitattributes marks filter=nebel, so a non-match here means
+// .gitattributes and .nebel.yaml disagree about that path, not that the
+// path is legitimately unmanaged.
 //
 // filePath must be the file's path relative to the repository root — it is
 // both the rule-matching key and part of the AAD binding the ciphertext to
@@ -57,7 +72,7 @@ var ErrKeyVersionMissing = errors.New("filterop: key version not registered loca
 func Clean(cfg *config.Config, keyring Keyring, filePath string, input []byte) ([]byte, error) {
 	rule, ok := cfg.MatchRule(filePath)
 	if !ok {
-		return input, nil
+		return nil, fmt.Errorf("%w: %s", ErrNoMatchingRule, filePath)
 	}
 	version := cfg.CurrentVersion()
 	key, haveKey := keyring[version]
@@ -102,7 +117,9 @@ type Skipped struct {
 // at all passes through unchanged (AC-6.7 — e.g. a file not yet migrated).
 // A value that *is* tagged but fails to parse or authenticate is a genuine
 // corruption or tampering signal and is reported as an error rather than
-// smudged into a wrong-but-plausible plaintext (AC-6.9).
+// smudged into a wrong-but-plausible plaintext (AC-6.9). A filePath that
+// matches no rule at all is ErrNoMatchingRule, for the same reason as in
+// Clean: git would not have invoked this filter for it otherwise.
 //
 // Unlike Clean, Smudge selects its key by the value's own tag-declared
 // version (AC-6.13), not the config's current version. A well-formed tag
@@ -116,7 +133,7 @@ type Skipped struct {
 func Smudge(cfg *config.Config, keyring Keyring, filePath string, input []byte) ([]byte, []Skipped, error) {
 	rule, ok := cfg.MatchRule(filePath)
 	if !ok {
-		return input, nil, nil
+		return nil, nil, fmt.Errorf("%w: %s", ErrNoMatchingRule, filePath)
 	}
 	if rule.Mode == config.ModeValue {
 		return smudgeValues(rule, keyring, filePath, input)

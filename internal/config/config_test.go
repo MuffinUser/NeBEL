@@ -162,6 +162,24 @@ rules:`+tt.rule+`
 	}
 }
 
+// A malformed glob pattern is caught when the repository is opened, not
+// silently treated by MatchRule as "never matches" — MatchRule's bool-only
+// signature discards doublestar.Match's error, so an invalid pattern that
+// slipped past this check would be a silent, permanent bypass for that
+// rule (audit 2026-09-29, P07 sub-issue 3).
+func TestLoadRejectsInvalidGlobPattern(t *testing.T) {
+	path := writeTempConfig(t, `
+salt: c3RydWNyeXB0LXRlc3Qtc2FsdC0xNg==
+canary: "ENC[AES256_SIV,data:aGVsbG8=]"
+rules:
+  - files: "secrets/[.pem"
+    mode: file
+`)
+	if _, err := Load(path); !errors.Is(err, ErrInvalidPattern) {
+		t.Errorf("Load() error = %v, want %v", err, ErrInvalidPattern)
+	}
+}
+
 // A malformed field path is caught when the repository is opened, not
 // silently on whichever machine first stages a matching file.
 func TestLoadRejectsBadFieldPath(t *testing.T) {

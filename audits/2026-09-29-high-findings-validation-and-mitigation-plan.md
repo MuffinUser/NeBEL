@@ -22,11 +22,50 @@ Each finding was independently re-derived by reading the cited source files at t
 
 **All seven High findings stand.** None should be downgraded; P04 arguably deserves more weight than the audit gave it, and P05 should be read together with the smudge-passthrough gap noted above rather than in isolation.
 
-## 3. A structural fact that changes the plan
+## 3. Priority order — what to fix first, and what to bundle together
+
+Ranked by importance to the tool's core promise (protecting secrets), not by implementation effort. The distinguishing question at each tier: does this bug leak the secret itself, or something weaker (the key, or integrity of already-protected data)? Within "leaks the secret" bugs, does it leak silently while reporting success (worst — false sense of security), and how easily does a normal user trigger it without doing anything unusual?
+
+**Tier 1 — Silent, complete plaintext exposure while the tool reports success.** These are the worst class of bug for an encryption tool: nothing looks wrong, but the secret is fully unprotected in the git blob.
+
+1. **P07(1)** — root-only vs. recursive glob mismatch. Highest priority of all: triggered by the single most natural pattern a user would write (`*.env`-style, exactly like `.gitignore` habits) combined with the equally common case of the file living in a subdirectory. `add file` reports success; git invokes the filter; nebel's own matcher silently disagrees and lets plaintext through.
+2. **P04** — duplicate JSON keys. Full exposure of exactly the value most JSON consumers will actually use (last-write-wins on unmarshal), while the encrypted first copy is decoration.
+3. **P03** — dotted path collision. Full exposure of the intended field; requires a specific naming collision, so somewhat less likely to occur than P07(1)/P04, but total when it does.
+4. **P07(3)** — discarded glob-match errors. A malformed hand-edited rule silently protects nothing; requires manual `.gitattributes`/config editing to trigger, so lower likelihood than the above, same total impact.
+5. **P07(2)** — unescaped filenames with spaces. Narrower trigger condition (spaces in filenames), same silent-total-bypass outcome.
+
+**Tier 2 — Large partial plaintext exposure.**
+
+6. **P02** — YAML quoted-string comment truncation. Not silent-total like Tier 1, but close in practice: in the audit's own example, only the first 4 characters end up encrypted and nearly the entire rest of the secret is left as plaintext. Triggers on any secret value containing a literal `" #"`, which is plausible for real passwords/tokens/connection strings.
+
+**Tier 3 — Data loss, not a leak.** Different axis entirely (destroys the user's own work, doesn't expose a secret to a third party), but ranked here because it's trivially easy to trigger with completely ordinary use — no attacker, no unusual input required.
+
+7. **P01** — re-running `init` destroys uncommitted/staged changes to managed files.
+
+**Tier 4 — Conditional local exposure, requires an additional attacker capability.**
+
+8. **P06** — derived key visible via process argument list. Only exploitable by a co-located observer who can already read another user's/process's argv (shared host, container escape, etc.) — a real gap and inconsistent with the tool's own stated threat model, but requires more attacker capability than "can read the git repo," which is all Tiers 1–3 require.
+
+**Tier 5 — Integrity-only, and largely redundant with an accepted design gap.**
+
+9. **P05** — type metadata not authenticated. Real, but as noted in §2, an attacker with the blob-write access this requires can already substitute plaintext directly via the pre-existing, intentional smudge passthrough — so this doesn't expand what such an attacker can already do, it only makes one specific form of tampering (type-flip) harder to spot in review.
+
+### What to fix together
+
+- **Package A — "filter/rule matching correctness" (P07(1), P07(2), P07(3)):** same files (`config.go`'s `Validate`/`MatchRule`, `add.go`'s `addGitattributesPattern`, `filterop.go`'s `Clean`), same underlying defect class (a registered rule doesn't actually guarantee git and nebel agree on what's matched), same test setup. Do this as one PR — it's also the single highest-priority fix, so it should be first regardless of grouping.
+- **Package B — "fail-closed field resolution" (P03, P04):** different files (`path.go`/`json.go` vs. the same), but the identical defensive pattern (detect an ambiguous/duplicate field target and hard-error via `required=true` instead of silently protecting only one candidate). Natural to design and review together even though the code changes are in different functions.
+- **Package C — P02 alone**, but worth opening the YAML renderer "under the hood" only once: if this work is scheduled, consider folding in the audit's medium-priority P10 (control characters not escaped) and P11 (multi-document YAML only partially handled) at the same time, since they touch the exact same rendering/parsing code path and the same test harness — doing them separately means paying the review/regression-risk cost of touching `yaml.go`'s scalar handling three times instead of once. (P10/P11 are not part of this High-severity validation pass; flagged here purely as an efficiency note.)
+- **Package D — P01 alone.** Self-contained (`gitutil.go`/`init.go`), no shared code with the others — can be done in parallel by a different engineer with no coordination cost.
+- **Package E — P06, and worth bundling with the audit's separate (non-defect) "harden local key storage" suggestion.** A single fix — a dedicated `0600` key file instead of `git config` — addresses both the argv-exposure bug and that hardening suggestion at once.
+- **Package F — P05, standalone, last.** Breaking ciphertext-format change with its own migration path; do not bundle with anything else, since it needs its own versioned release and rollout communication independent of all other fixes.
+
+Recommended shipping order: **Package A → Package B → Package C → Package D and Package E in parallel → Package F** as a separate, later release.
+
+## 4. A structural fact that changes the plan
 
 `filter.nebel.required` is set to `true` at registration (`cmd/nebel/init.go:356`). This means git already treats a *failing* clean/smudge filter invocation as a hard error that blocks the operation (e.g. blocks `git add`/commit). Several of the cheapest mitigations below are "detect the bad case and return an error" rather than "detect and gracefully recover" — and because of `required=true`, those errors will actually be enforced by git, not just logged. This makes P03, P04, and P07(1)/(3) considerably cheaper to fix well than a full silent-recovery design would be.
 
-## 4. Phased mitigation plan
+## 5. Phased mitigation plan
 
 ### Phase 0 — Immediate, no code change (do now, in parallel with everything else)
 
@@ -61,7 +100,7 @@ Each finding was independently re-derived by reading the cited source files at t
 
 Smudge currently passes through *any* untagged plaintext in a protected field with no error at all, intentionally, to support gradual migration (AC-6.7). This is the more foundational relative of P05 and is a known limitation shared by filter-driven transparent-encryption tools generally (nebel, like git-crypt or unsigned sops usage, does not by itself defend against a git committer with write access substituting content — that requires signed commits / branch protection, outside this tool's scope). Worth an explicit "strict mode" option that fails smudge/status on an untagged protected field, opt-in so existing migration workflows keep working. This is a scope/product decision, not included in the effort estimates above.
 
-## 5. Total effort estimate
+## 6. Total effort estimate
 
 - Phase 1: ~3–4 developer-days
 - Phase 2: ~2–3 developer-days

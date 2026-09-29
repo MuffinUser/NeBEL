@@ -1,0 +1,40 @@
+# Validation and Mitigation Plan: Medium-Priority Findings from the 2026-09-29 Repository Analysis
+
+Source audit: [2026-09-29-repository-analysis.md](2026-09-29-repository-analysis.md) (untracked in the working copy at the time of this writing; not present on this branch — refer to the copy in the main checkout).
+
+Companion to [2026-09-29-high-findings-validation-and-mitigation-plan.md](2026-09-29-high-findings-validation-and-mitigation-plan.md), which validated and fixed the seven "High" findings (P01–P07, Packages A–F, all done). That document explicitly left the five "Medium" findings — P08 through P12 — out of scope. This document covers those five.
+
+## 1. Verification method
+
+Each finding was re-derived directly against the current source (which, by this point, already reflects the Package A–F fixes — several of those changed the exact functions P08–P12 touch, e.g. Package F's type-bound value tags). P08, P10, and P11 were additionally verified empirically: real repro inputs run through the actual code (`go build`/`go test` are available in this environment, unlike during the original audit, which noted `go: command not found`).
+
+## 2. Verdict summary
+
+| ID | Verdict | Notes |
+|---|---|---|
+| P08 | **Confirmed (empirically)** | `cleanValues` and `Clean`'s whole-file path both used `tag.IsEncrypted` (a bare `"ENC["` prefix check) to decide "already encrypted, skip". A plaintext value/field that merely starts with `ENC[` without being a well-formed tag was left uncommitted-as-ciphertext, i.e. committed as plaintext. Reproduced directly against pre-fix `cleanValues`. |
+| P09 | **Confirmed, worse than stated** | Not just "an interrupted rotation can leave an inconsistent state" — the generated password (when auto-generated) is registered as a local key and the config is rewritten to point at it *before* `printRotateSummary` (the only place that password is ever shown) runs. A failure in the eager re-encryption step after that point loses the password permanently while the key it produced is already live. |
+| P10 | **Confirmed (empirically)** | `yamlHandler.Render` escapes `\` and `"` but not control characters. A decrypted string containing a literal `\n` is spliced into a double-quoted scalar as a real line break, which YAML's line-folding rules silently turn into a space on the next parse — reproduced directly: round-tripping `"line one\nline two"` through `Render`+`Locate` returns `"line one line two"`. |
+| P11 | **Confirmed (empirically)** | `Locate` and `Leaves` both operate on `file.Docs[0]` only. A `---`-separated two-document YAML stream with `password` in both documents: `Leaves` returns only the first document's leaf. A configured `encrypt: [password]` rule would silently leave the second document's value in plaintext. |
+| P12 | **Confirmed, but narrower than the audit implies** | `reportCheckoutResult` always returns `nil`. However, one category it can report — a file that's merely waiting on a key version this clone hasn't fetched yet (AC-6.11's intentional, documented, recoverable passthrough) — is deliberately *not* supposed to fail the command; `TestInitVersionRecoversContentFromBeforeRotation` already asserts this succeeds. The real gap is the *other* category folded into the same `failures` slice: a genuine per-file checkout failure (AC-6.9 tamper/corruption), which has no test asserting either way and every reason (per AC-6.9's own "fails with a clear error" intent) to make the command's exit code reflect it. |
+
+## 3. Design decision needed before P11 can be fixed
+
+The audit itself flagged this as ambiguous ("Ob ein konfigurierter Pfad fachlich für alle Dokumente gelten soll, ist aus dem untersuchten Vertrag nicht abschließend geklärt") and Package C's write-up flagged folding P10/P11 into that same PR as a deferred efficiency note. Two real options:
+
+- Reject multi-document YAML outright (`Locate`/`Leaves` return a clear "multi-document YAML is not supported" error when `len(file.Docs) > 1`).
+- Extend `Locate`/`Leaves` to operate across all documents (raises its own ambiguity: the same path present in two documents — which one does smudge restore into, if `Encrypt` names it once?).
+
+**Decision: reject multi-document YAML.** Silent partial coverage is a worse failure mode for an encryption tool than a hard, clear refusal; extending true multi-doc support can be revisited later if real demand shows up.
+
+## 4. Status
+
+- **P08 — done.** `internal/tag`'s new `LooksEncrypted` replaces the bare `tag.IsEncrypted` prefix check as the gate `Clean` (whole-file) and `cleanValues` use to decide "already encrypted, leave alone". `LooksEncrypted` requires the full `ENC[...]` delimiter shape *and* a recognized algorithm name in the first field, but — unlike a full `tag.Parse` — does not require the `"key:"` field, so a genuine pre-rotation legacy tag (no key field at all; see `internal/tag`'s doc comment and `TestMigrationLeftoverCheckCatchesUndecryptedFiles`) is still correctly left alone instead of being double-wrapped. (A first attempt using a full `tag.Parse` as the gate regressed exactly that test — confirmed directly — because a legacy tag genuinely fails `Parse` on the missing `"key:"` field alone.) `tag.IsEncrypted` itself is unchanged and still used, correctly, as smudge's pre-`Parse` fast-path (AC-6.9's malformed-input-is-corruption path is unaffected). Verified directly against the pre-fix code with a plaintext value/field starting with `ENC[` in both whole-file and per-value mode; both now get encrypted. New regression tests: `TestCleanEncryptsPlaintextStartingWithEncPrefix`, `TestCleanLeavesLegacyWholeFileTagAlone` (`internal/filterop/filterop_test.go`), `TestCleanValuesEncryptsFieldStartingWithEncPrefix` (`internal/filterop/value_test.go`). Full existing test suite (`go test ./...`, `go vet ./...`) passes unchanged.
+- **P12 — done.** `reportCheckoutResult` now returns a new `cmd/nebel.ErrCheckoutFailed`-wrapping error when the *genuine* checkout failures `CheckoutAll` reported (`gitutil.CheckoutFailure`, counted before the AC-6.11 merge below) are non-empty, so `main.go`'s existing `os.Exit(1)` fires. Deliberately does **not** treat a file that's merely still waiting on a missing key version (the `scanUndecrypted`/AC-6.11 passthrough case merged into the same `failures` slice afterward for reporting) as a failure — that keeps exiting 0, matching `TestInitVersionRecoversContentFromBeforeRotation`'s existing, explicit expectation that this specific case is a recoverable success, not an error. Verified directly: a fabricated genuine `CheckoutFailure` now makes `reportCheckoutResult` return a non-nil error naming the failure count; a missing-key-version-only case still returns nil. New regression tests: `TestReportCheckoutResultFailsOnGenuineCheckoutFailure`, `TestReportCheckoutResultSucceedsWhenOnlyMissingKeyVersion` (`cmd/nebel/checkout_result_test.go`). Full existing test suite passes unchanged.
+- **P09 — open.** Needs its own care before touching: (1) surface the auto-generated password immediately after generation rather than only in the final success summary, so a later failure can't strand it unrecoverably; (2) give rotation either a real rollback (derive and stage everything before flipping the committed config/local-key state) or a documented, tested resume path if it's interrupted after that flip. Not started.
+- **P10 — open.** Extend `yamlHandler.Render`'s escaping to cover `\n`, `\r`, `\t`, and other C0 control characters (not just `\` and `"`), with round-trip tests for each plus CRLF combinations. Not started.
+- **P11 — open.** Per the decision in §3: make `Locate` and `Leaves` return a clear error when `len(file.Docs) > 1`, instead of silently operating on `file.Docs[0]` alone. Not started.
+
+## 5. Notes carried over, not re-litigated here
+
+Phase 0 of the High-findings plan already flagged that `git remote -v` in this repository resolves to a URL with a live GitHub PAT embedded in plaintext, and recommended rotating it immediately. That has not been re-verified as fixed or unfixed as part of this pass — worth confirming separately.

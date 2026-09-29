@@ -20,6 +20,28 @@ import (
 // the repository root.
 const FileName = ".nebel.yaml"
 
+// CurrentFormatVersion is the .nebel.yaml schema version this build writes
+// and understands. It is bumped only for a breaking change to the schema
+// itself (a field renamed, retyped, or reinterpreted) — never for additive,
+// backward-compatible fields, and never in lockstep with the tool's own
+// release version. Load refuses a file declaring a version greater than
+// this one before attempting to parse it as the current schema, so an
+// older nebel binary reports "upgrade nebel" instead of a confusing parse
+// or validation error on fields it doesn't understand.
+const CurrentFormatVersion = 1
+
+// ErrUnsupportedFormat is returned by Load when a config declares a
+// format_version newer than CurrentFormatVersion.
+var ErrUnsupportedFormat = errors.New("config: unsupported format_version")
+
+// formatVersionPeek isolates just the format_version field so Load can
+// check it before attempting a full parse (which may fail outright on a
+// genuinely newer schema) or Validate (whose error messages assume the
+// current schema's meaning of each field).
+type formatVersionPeek struct {
+	FormatVersion int `yaml:"format_version"`
+}
+
 // Mode is the encryption granularity a rule applies to matching files.
 type Mode string
 
@@ -52,6 +74,19 @@ type Rule struct {
 
 // Config is the parsed contents of .nebel.yaml.
 type Config struct {
+	// FormatVersion is the schema version this file was written as (see
+	// CurrentFormatVersion). A file predating this field's introduction has
+	// none — Load treats a zero value the same as 1, the schema every
+	// released version through v0.4.x already speaks.
+	FormatVersion int `yaml:"format_version,omitempty"`
+
+	// CreatedWith is the nebel build version (`nebel version`) that
+	// bootstrapped this repo — informational only, never consulted by
+	// Load or any compatibility check. Recorded so a human debugging a
+	// future incompatibility can see what actually produced the file,
+	// independent of FormatVersion above.
+	CreatedWith string `yaml:"created_with,omitempty"`
+
 	// KeyVersion is the current key version (spec 11): Salt and Canary
 	// below are this version's. clean always encrypts under this version;
 	// an older version an existing value still carries is looked up via
@@ -149,11 +184,25 @@ func (c *Config) MatchRule(path string) (Rule, bool) {
 }
 
 // Load reads and parses path, then validates it.
+//
+// It checks format_version before doing either: a file from a future,
+// breaking schema change must be rejected with "upgrade nebel" up front,
+// not fail deep inside a full unmarshal or Validate whose error messages
+// assume the current schema.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: reading %s: %w", path, err)
 	}
+
+	var peek formatVersionPeek
+	if err := yaml.Unmarshal(data, &peek); err != nil {
+		return nil, fmt.Errorf("config: parsing %s: %w", path, err)
+	}
+	if peek.FormatVersion > CurrentFormatVersion {
+		return nil, fmt.Errorf("%w: %s declares format_version %d, this build only understands up to %d — upgrade nebel", ErrUnsupportedFormat, path, peek.FormatVersion, CurrentFormatVersion)
+	}
+
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("config: parsing %s: %w", path, err)
@@ -171,6 +220,9 @@ func Load(path string) (*Config, error) {
 // (spec 08 AC-8.6 wants full formatting preservation — deferred along with
 // the rest of `nebel add`'s comment-preserving edit).
 func (c *Config) Save(path string) error {
+	if c.FormatVersion == 0 {
+		c.FormatVersion = CurrentFormatVersion
+	}
 	data, err := yaml.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("config: marshaling: %w", err)

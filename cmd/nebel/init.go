@@ -137,10 +137,12 @@ func bootstrapRepo(root, configPath, password string) error {
 	}
 
 	cfg := &config.Config{
-		KeyVersion: 1, // AC-4.10: bootstrap always starts at version 1.
-		Salt:       base64.StdEncoding.EncodeToString(salt),
-		Canary:     canary,
-		Rules:      []config.Rule{},
+		FormatVersion: config.CurrentFormatVersion,
+		CreatedWith:   buildVersion(), // informational only — see Config.CreatedWith.
+		KeyVersion:    1,              // AC-4.10: bootstrap always starts at version 1.
+		Salt:          base64.StdEncoding.EncodeToString(salt),
+		Canary:        canary,
+		Rules:         []config.Rule{},
 	}
 
 	// AC-7.4: the config we're about to commit must be self-consistent

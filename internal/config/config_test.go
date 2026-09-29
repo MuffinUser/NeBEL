@@ -221,6 +221,71 @@ func TestCanaryRoundTrip(t *testing.T) {
 	}
 }
 
+// AC-4.11: a config with no format_version field — every file any released
+// version through v0.4.x ever wrote — loads exactly as if it declared
+// format_version: 1, with no error.
+func TestLoadDefaultsFormatVersion(t *testing.T) {
+	path := writeTempConfig(t, `
+salt: c3RydWNyeXB0LXRlc3Qtc2FsdC0xNg==
+canary: "ENC[AES256_SIV,data:aGVsbG8=]"
+rules: []
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.FormatVersion != 0 {
+		t.Errorf("FormatVersion = %d, want 0 (unset) as parsed", cfg.FormatVersion)
+	}
+}
+
+// AC-4.12: a format_version newer than this build understands is rejected
+// up front, before the rest of the file is parsed or validated — proven
+// here by pairing it with a mode value that would otherwise fail
+// Validate with a different, misleading error.
+func TestLoadRejectsFutureFormatVersion(t *testing.T) {
+	path := writeTempConfig(t, `
+format_version: 999
+salt: c3RydWNyeXB0LXRlc3Qtc2FsdC0xNg==
+canary: "ENC[AES256_SIV,data:aGVsbG8=]"
+rules:
+  - files: "secrets/*.pem"
+    mode: bogus
+`)
+	_, err := Load(path)
+	if !errors.Is(err, ErrUnsupportedFormat) {
+		t.Errorf("Load() error = %v, want %v", err, ErrUnsupportedFormat)
+	}
+	if errors.Is(err, ErrInvalidMode) {
+		t.Error("Load() also reported ErrInvalidMode — the format gate did not run before Validate")
+	}
+}
+
+// Save stamps an unset FormatVersion with the current build's, so a
+// legacy config that round-trips through Load/Save is marked explicitly
+// going forward, without ever downgrading an already-current field.
+func TestSaveStampsFormatVersion(t *testing.T) {
+	path := writeTempConfig(t, `
+salt: c3RydWNyeXB0LXRlc3Qtc2FsdC0xNg==
+canary: "ENC[AES256_SIV,data:aGVsbG8=]"
+rules: []
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := cfg.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after Save: %v", err)
+	}
+	if reloaded.FormatVersion != CurrentFormatVersion {
+		t.Errorf("FormatVersion after Save = %d, want %d", reloaded.FormatVersion, CurrentFormatVersion)
+	}
+}
+
 func writeTempConfig(t *testing.T, contents string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), FileName)

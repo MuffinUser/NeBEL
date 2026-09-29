@@ -6,11 +6,28 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 )
 
 // version is set at release build time via -ldflags "-X main.version=...".
-// A plain `go build` (local dev) leaves it at "dev".
+// A plain `go build` (local dev) leaves it at "dev"; buildVersion() below
+// falls back to the module version `go install` embeds in that case.
 var version = "dev"
+
+// buildVersion returns version, or — when a plain `go build`/`go install`
+// left it at the "dev" default — the module version Go's own build info
+// records (e.g. "v0.4.1" for `go install .../nebel@v0.4.1`, "(devel)" for
+// a local checkout). Used to stamp Config.CreatedWith at bootstrap so
+// that field means something even for a binary built without ldflags.
+func buildVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+		return info.Main.Version
+	}
+	return version
+}
 
 func main() {
 	if len(os.Args) < 2 {

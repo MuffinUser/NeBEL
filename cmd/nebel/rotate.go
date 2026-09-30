@@ -82,6 +82,13 @@ func runRotate(args []string) error {
 	generated := password == ""
 	if generated {
 		password = generatePassword()
+		// Shown now, before any state changes below can fail: this is the
+		// only place this password is ever displayed, so it must survive
+		// even if registering the key, saving the config, or re-encrypting
+		// fails partway through (audit 2026-09-30, R03 — previously this
+		// ran last, so a later failure could strand an already-active
+		// derived key with its password never shown at all).
+		printGeneratedPasswordNotice(password)
 	}
 
 	// A password identical to the current one would still rotate the
@@ -132,7 +139,7 @@ func runRotate(args []string) error {
 		return fmt.Errorf("registering local key: %w", err)
 	}
 	if err := next.Save(configPath); err != nil {
-		return err
+		return rotateRecoveryHint(err)
 	}
 
 	// Stage the config, then eagerly re-encrypt every managed file/field
@@ -143,27 +150,51 @@ func runRotate(args []string) error {
 	// reaches everything: nothing left encrypted going in means nothing
 	// comes out still tagged with the old version.
 	if err := gitutil.Add(root, config.FileName); err != nil {
-		return err
+		return rotateRecoveryHint(err)
 	}
 	migrated, err := gitutil.RenormalizeAll(root)
 	if err != nil {
-		return fmt.Errorf("re-encrypting existing content under the new version: %w", err)
+		return rotateRecoveryHint(fmt.Errorf("re-encrypting existing content under the new version: %w", err))
 	}
 
-	printRotateSummary(newVersion, generated, password, migrated)
+	printRotateSummary(newVersion, migrated)
 	return nil
 }
 
-// printRotateSummary reports AC-11.7's required consequences and AC-11.8's
-// no-secrets-beyond-the-password constraint.
-func printRotateSummary(newVersion int, generated bool, password string, migrated []string) {
-	if generated {
-		fmt.Printf("Generated new password: %s\n", password)
-		fmt.Println("⚠ This password will not be shown again — store it in your password")
-		fmt.Println("  manager now and share it with your team out-of-band.")
-		fmt.Println()
-	}
+// rotateRecoveryHint explains how to undo a rotation that failed partway
+// through registering the new config or re-encrypting content under it
+// (audit 2026-09-30, R03). Nothing runRotate does reaches this point is
+// ever committed — only the working tree and the index change — so a
+// plain git command already fully reverts it; no separate rollback
+// mechanism is needed. Re-running `nebel rotate` also works without first
+// reverting anything: eager re-encryption is idempotent (spec 11 AC-11.10)
+// and Set/Save both tolerate being called again with the same or a fresh
+// version, so a retry converges the rest instead of leaving anything
+// half-migrated — it just mints another version in the process.
+func rotateRecoveryHint(err error) error {
+	return fmt.Errorf("%w\n\nNothing from this rotation has been committed yet — "+
+		"`git checkout -- .` (or `git reset --hard HEAD`, if you have no other "+
+		"uncommitted changes) fully discards it. Or leave it as-is, fix the "+
+		"underlying problem, and re-run `nebel rotate`: re-encryption is "+
+		"idempotent, so it converges the rest instead of leaving anything "+
+		"half-migrated.", err)
+}
 
+// printGeneratedPasswordNotice reports an auto-generated password the
+// moment it exists (AC-11.8's no-secrets-beyond-the-password constraint),
+// rather than waiting for rotation to fully succeed: this is the only
+// place the password is ever shown, so it must not be deferred past any
+// step — key registration, config save, re-encryption — that could still
+// fail (audit 2026-09-30, R03).
+func printGeneratedPasswordNotice(password string) {
+	fmt.Printf("Generated new password: %s\n", password)
+	fmt.Println("⚠ This password will not be shown again — store it in your password")
+	fmt.Println("  manager now and share it with your team out-of-band.")
+	fmt.Println()
+}
+
+// printRotateSummary reports AC-11.7's required consequences.
+func printRotateSummary(newVersion int, migrated []string) {
 	fmt.Printf("Rotated to key version %d and re-encrypted %s under it.\n", newVersion, plural(len(migrated), "file"))
 	fmt.Println()
 	fmt.Println("Staged:")

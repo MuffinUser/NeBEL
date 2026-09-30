@@ -268,22 +268,57 @@ func IsShallow(repoRoot string) (bool, error) {
 var ErrDirtyManagedFiles = errors.New("gitutil: managed file(s) have local changes CheckoutAll would discard")
 
 // DirtyFiles returns the subset of files (repo-relative paths) whose
-// working tree content differs from HEAD — staged and unstaged changes
-// alike, since `git diff HEAD --` compares the working tree directly
-// against HEAD regardless of what's in the index. That is exactly what
-// matters to a caller about to overwrite the working tree from HEAD: an
-// edit only staged, not committed, is just as much at risk as one that
-// was never staged at all.
+// working tree or index content differs from HEAD — staged and unstaged
+// changes alike. That is exactly what matters to a caller about to
+// overwrite both the working tree and the index from HEAD: an edit only
+// staged, not committed, is just as much at risk as one that was never
+// staged at all.
+//
+// Two separate comparisons are needed, not one: `git diff HEAD --`
+// compares the working tree directly against HEAD, which is blind to a
+// file whose worktree content happens to already match HEAD again while
+// the index still holds a different, staged version (e.g. after `git
+// restore --source=HEAD --worktree` following a `git add`). `git diff
+// --cached HEAD --` compares the index against HEAD and catches exactly
+// that case. A caller like CheckoutAll, which runs `git checkout HEAD --
+// <path>` and thereby resets both the worktree and the index, must know
+// about a change in either one.
 func DirtyFiles(repoRoot string, files []string) ([]string, error) {
 	if len(files) == 0 {
 		return nil, nil
 	}
-	args := append([]string{"diff", "--name-only", "HEAD", "--"}, files...)
+
+	worktreeDirty, err := diffNames(repoRoot, files, "git diff HEAD", "diff", "--name-only", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	indexDirty, err := diffNames(repoRoot, files, "git diff --cached HEAD", "diff", "--cached", "--name-only", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]bool, len(worktreeDirty)+len(indexDirty))
+	var dirty []string
+	for _, name := range append(worktreeDirty, indexDirty...) {
+		if !seen[name] {
+			seen[name] = true
+			dirty = append(dirty, name)
+		}
+	}
+	return dirty, nil
+}
+
+// diffNames runs `git <diffArgs> -- <files>` and returns the (unsorted,
+// possibly empty) list of paths it reports changed. errLabel names the
+// invocation for error messages (e.g. "git diff HEAD").
+func diffNames(repoRoot string, files []string, errLabel string, diffArgs ...string) ([]string, error) {
+	args := append(append([]string{}, diffArgs...), "--")
+	args = append(args, files...)
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("gitutil: git diff HEAD: %w", wrapExitErr(err))
+		return nil, fmt.Errorf("gitutil: %s: %w", errLabel, wrapExitErr(err))
 	}
 	trimmed := strings.TrimSpace(string(out))
 	if trimmed == "" {

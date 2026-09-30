@@ -204,6 +204,20 @@ func cleanValues(rule config.Rule, version int, key []byte, haveKey bool, filePa
 			return nil, fmt.Errorf("%w: current version %d — run `nebel init`", ErrKeyVersionMissing, version)
 		}
 
+		// Refuse to encrypt a value smudge could never render back out.
+		// These are exactly the checks smudgeValues runs on the decrypted
+		// plaintext before rendering it — run here, up front, on the same
+		// plaintext before it is ever sealed, a failure here is a rejected
+		// `nebel add`/`git add`/renormalize instead of ciphertext already
+		// committed to git that no future smudge can turn back into the
+		// original value (audit 2026-09-30, R06).
+		if err := validTypeLiteral(span.Value, span.Type); err != nil {
+			return nil, fmt.Errorf("filterop: clean %s at %s: value cannot be safely restored later: %w", filePath, field, err)
+		}
+		if _, err := handler.Render(span.Value, span.Type); err != nil {
+			return nil, fmt.Errorf("filterop: clean %s at %s: value cannot be safely restored later: %w", filePath, field, err)
+		}
+
 		// The type travels in the tag as plaintext metadata, not inside
 		// the ciphertext — so it's bound into the AAD instead, exactly
 		// like the file/field path components, otherwise it could be

@@ -346,6 +346,65 @@ func TestCheckoutAllRefusesDirtyManagedFiles(t *testing.T) {
 	}
 }
 
+// Regression test for audit R02 (2026-09-30): a file whose worktree
+// content matches HEAD again while the index still holds a different,
+// staged version was not caught by the dirty check at all, because it
+// only ever compared the worktree against HEAD. `git checkout HEAD --
+// <path>` (what CheckoutAll runs per file) resets both the worktree and
+// the index, so it silently discarded the staged change with no warning.
+func TestCheckoutAllRefusesIndexOnlyDirtyState(t *testing.T) {
+	dir := newTempRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, ".gitattributes"), []byte("*.txt filter=nebel\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeAndCommit(t, dir, "secret.txt", "original\n")
+	registerCatFilter(t, dir)
+
+	const staged = "staged, then worktree reverted back to HEAD\n"
+	path := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(path, []byte(staged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("add", "--", "secret.txt")
+	// Reset only the worktree back to HEAD; the index still holds staged.
+	run("restore", "--source=HEAD", "--worktree", "--", "secret.txt")
+
+	if got, err := os.ReadFile(path); err != nil || string(got) != "original\n" {
+		t.Fatalf("test setup: worktree = %q, %v, want %q", got, err, "original\n")
+	}
+	indexContent := runOut(t, dir, "show", ":secret.txt")
+	if indexContent != staged {
+		t.Fatalf("test setup: index = %q, want %q", indexContent, staged)
+	}
+
+	_, _, err := CheckoutAll(dir)
+	if !errors.Is(err, ErrDirtyManagedFiles) {
+		t.Fatalf("CheckoutAll() error = %v, want %v", err, ErrDirtyManagedFiles)
+	}
+
+	if got := runOut(t, dir, "show", ":secret.txt"); got != staged {
+		t.Errorf("staged change was discarded from the index despite CheckoutAll refusing: index = %q, want %q", got, staged)
+	}
+}
+
+func runOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return string(out)
+}
+
 // The ordinary case CheckoutAll exists for — no local changes at all, as
 // right after `nebel init` on a fresh clone — must not be blocked by the
 // new dirty check.

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -223,6 +224,97 @@ func TestAllEnumeratesEveryVersion(t *testing.T) {
 	for version, want := range keys {
 		if !bytes.Equal(got[version], want) {
 			t.Errorf("All()[%d] = %x, want %x", version, got[version], want)
+		}
+	}
+}
+
+// Regression test for the 2026-09-30 re-audit's R04: writeKeyFile must
+// replace the key file atomically (temp file + rename) rather than
+// truncating it in place, so a reader never observes a partially-written
+// file, and no stray temp file is left behind on the success path.
+func TestWriteKeyFileReplacesAtomicallyAndLeavesNoTempFile(t *testing.T) {
+	dir := newTempRepo(t)
+	chdir(t, dir)
+
+	if err := Set(1, bytes.Repeat([]byte{0x11}, 64)); err != nil {
+		t.Fatalf("Set(1): %v", err)
+	}
+	// Overwrite with a second Set, so writeKeyFile actually replaces
+	// existing content rather than just creating the file for the first
+	// time.
+	if err := Set(2, bytes.Repeat([]byte{0x22}, 64)); err != nil {
+		t.Fatalf("Set(2): %v", err)
+	}
+
+	gitDir := filepath.Join(dir, ".git")
+	entries, err := os.ReadDir(gitDir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", gitDir, err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Errorf("leftover temp file after Set: %s", e.Name())
+		}
+	}
+
+	got, err := All()
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("All() = %v, want exactly versions 1 and 2", got)
+	}
+	if !bytes.Equal(got[1], bytes.Repeat([]byte{0x11}, 64)) {
+		t.Errorf("All()[1] = %x, want the version-1 key", got[1])
+	}
+	if !bytes.Equal(got[2], bytes.Repeat([]byte{0x22}, 64)) {
+		t.Errorf("All()[2] = %x, want the version-2 key", got[2])
+	}
+
+	info, err := os.Stat(filepath.Join(gitDir, keyFileName))
+	if err != nil {
+		t.Fatalf("stat key file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("key file permissions after replace = %o, want 0600", perm)
+	}
+}
+
+// Regression test for R04: concurrent Set calls from goroutines within
+// the same process must not lose an update to the read-modify-write
+// sequence (readKeyFile, mutate, writeKeyFile) that Set performs.
+func TestConcurrentSetDoesNotLoseUpdates(t *testing.T) {
+	chdir(t, newTempRepo(t))
+
+	const n = 20
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			key := bytes.Repeat([]byte{byte(i + 1)}, 64)
+			errs[i] = Set(i+1, key)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("Set(%d): %v", i+1, err)
+		}
+	}
+
+	got, err := All()
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(got) != n {
+		t.Fatalf("All() has %d versions after %d concurrent Set calls, want %d: %v", len(got), n, n, got)
+	}
+	for i := 0; i < n; i++ {
+		want := bytes.Repeat([]byte{byte(i + 1)}, 64)
+		if !bytes.Equal(got[i+1], want) {
+			t.Errorf("All()[%d] = %x, want %x", i+1, got[i+1], want)
 		}
 	}
 }

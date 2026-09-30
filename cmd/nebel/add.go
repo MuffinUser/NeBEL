@@ -335,5 +335,23 @@ func escapeGitattributesPattern(glob string) string {
 	if strings.HasPrefix(glob, "#") || strings.HasPrefix(glob, "!") {
 		glob = `\` + glob
 	}
-	return strings.ReplaceAll(glob, " ", `\ `)
+	if !strings.ContainsAny(glob, " \t") {
+		return glob
+	}
+	// A backslash-escaped space (`a\ b`) is not an escape as far as
+	// gitattributes' own line parser is concerned — it still splits the
+	// line on that whitespace, so the pattern ends up truncated and the
+	// rest is misread as a second (bogus) attribute, silently leaving
+	// the intended file with no filter assigned at all (audit
+	// 2026-09-30, R01: verified directly against `git check-attr`).
+	//
+	// What git's parser does honor is its own C-quoted form: a pattern
+	// field starting with '"' is read as a whole, backslash-unescaped
+	// string up to the matching closing '"', the same quoting
+	// gitignore/gitconfig already use. So quote the pattern instead,
+	// escaping '\' and '"' — the two characters that quoted form itself
+	// gives meaning to — on top of whatever escaping was already applied
+	// above.
+	quoted := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(glob)
+	return `"` + quoted + `"`
 }

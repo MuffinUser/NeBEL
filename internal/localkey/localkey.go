@@ -30,9 +30,20 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/MuffinUser/nebel/internal/gitutil"
 )
+
+// setMu serializes Set's read-modify-write of the key file against other
+// goroutines in this process. It does not extend across processes — a
+// separate `nebel` invocation racing this one (a concurrent filter
+// process, say) is not covered, since doing so portably (this project
+// supports Windows, so a unix-only syscall.Flock is off the table) would
+// need a cross-process lock file of its own, with its own stale-lock and
+// cleanup questions. Narrowing the race to cross-process only is a
+// deliberate, accepted trade-off, not a silent one.
+var setMu sync.Mutex
 
 // configKeyPrefix is the local git config variable a version's key was
 // stored under before this file existed (see readLegacyEntries) — still
@@ -144,6 +155,14 @@ func readKeyFile() (map[int]string, error) {
 // ascending version order (so the file diffs sensibly if ever inspected,
 // though it is never committed), and writes them to the key file with
 // 0o600 permissions — owner read/write only.
+//
+// The write goes to a temporary file in the same directory, which is
+// then renamed onto path, rather than truncating path in place: an
+// os.Rename within one directory is atomic, so a concurrent reader (Get,
+// or a filter process racing this write) always observes either the
+// complete old content or the complete new content, never a truncated or
+// partially-written file — which a plain os.WriteFile cannot promise if
+// this process is interrupted mid-write.
 func writeKeyFile(entries map[int]string) error {
 	path, err := keyFilePath()
 	if err != nil {
@@ -161,8 +180,29 @@ func writeKeyFile(entries map[int]string) error {
 		fmt.Fprintf(&b, "%d=%s\n", v, entries[v])
 	}
 
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
-		return fmt.Errorf("localkey: writing %s: %w", path, err)
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+keyFileName+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("localkey: creating temp file for %s: %w", path, err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // no-op once the rename below succeeds
+
+	if _, err := tmp.WriteString(b.String()); err != nil {
+		tmp.Close()
+		return fmt.Errorf("localkey: writing %s: %w", tmpPath, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("localkey: syncing %s: %w", tmpPath, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("localkey: closing %s: %w", tmpPath, err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		return fmt.Errorf("localkey: setting permissions on %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("localkey: replacing %s: %w", path, err)
 	}
 	return nil
 }
@@ -231,6 +271,9 @@ func Get(version int) (key []byte, ok bool, err error) {
 // the legacy git-config location (see readLegacyEntries), which this
 // never migrates or removes.
 func Set(version int, key []byte) error {
+	setMu.Lock()
+	defer setMu.Unlock()
+
 	entries, err := readKeyFile()
 	if err != nil {
 		return err

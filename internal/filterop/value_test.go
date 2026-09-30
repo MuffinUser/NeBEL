@@ -122,20 +122,32 @@ func TestValueRoundTripPreservesEmbeddedNewline(t *testing.T) {
 // decrypted plaintext would actually need writing back into the
 // document, and it fails loudly rather than producing output a later
 // Locate could silently corrupt on.
-func TestSmudgeValuesRejectsUnrenderableControlCharacter(t *testing.T) {
+// audit 2026-09-30, R06: Clean used to accept and encrypt a value smudge
+// could never render back out, discovering the failure only on the later,
+// already-committed read-back path. Clean must refuse it up front instead.
+func TestCleanValuesRejectsUnrenderableControlCharacter(t *testing.T) {
 	cfg := valueConfig("database.password")
 	doc := "database:\n  password: \"a\x01b\"\n"
 
-	cleaned, err := Clean(cfg, testKeyring, "config/staging.yaml", []byte(doc))
-	if err != nil {
-		t.Fatalf("Clean: %v", err)
+	_, err := Clean(cfg, testKeyring, "config/staging.yaml", []byte(doc))
+	if !errors.Is(err, format.ErrControlCharacterUnsupported) {
+		t.Fatalf("Clean error = %v, want %v", err, format.ErrControlCharacterUnsupported)
 	}
-	if strings.Contains(string(cleaned), "\x01") {
-		t.Fatalf("cleaned output still contains the raw control byte:\n%s", cleaned)
-	}
+}
 
-	if _, _, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned); !errors.Is(err, format.ErrControlCharacterUnsupported) {
-		t.Errorf("Smudge error = %v, want %v", err, format.ErrControlCharacterUnsupported)
+// audit 2026-09-30, R06: a JSON integer outside signed 64-bit range used to
+// clean successfully (json.Number carries it as text, untyped-checked) and
+// only fail on the later, already-committed smudge. Clean must refuse it
+// up front instead.
+func TestCleanValuesRejectsInt64Overflow(t *testing.T) {
+	cfg := &config.Config{Rules: []config.Rule{
+		{Files: "config/*.json", Mode: config.ModeValue, Encrypt: []string{"secret"}},
+	}}
+	doc := `{"secret": 18446744073709551615}`
+
+	_, err := Clean(cfg, testKeyring, "config/staging.json", []byte(doc))
+	if !errors.Is(err, ErrInvalidTypeLiteral) {
+		t.Fatalf("Clean error = %v, want %v", err, ErrInvalidTypeLiteral)
 	}
 }
 

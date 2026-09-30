@@ -234,3 +234,58 @@ func TestParseRejectsUnsupportedType(t *testing.T) {
 		t.Errorf("Parse() error = %v, want %v", err, ErrMalformed)
 	}
 }
+
+// Regression test for the 2026-09-30 audit's R05: LooksEncrypted must not
+// treat a value as already-encrypted just because it starts with "ENC[",
+// ends with "]", and names a recognized algorithm — every field actually
+// present must be well-formed too, notably a genuine "data:" field with
+// valid base64.
+func TestLooksEncryptedRejectsMalformedTagShapes(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{"no fields beyond algo", "ENC[AES256_SIV,not-a-real-tag]"},
+		{"invalid base64 in data", "ENC[AES256_SIV,key:1,data:???]"},
+		{"zero key version", "ENC[AES256_SIV,key:0,data:AA==]"},
+		{"negative key version", "ENC[AES256_SIV,key:-1,data:AA==]"},
+		{"non-numeric key version", "ENC[AES256_SIV,key:one,data:AA==]"},
+		{"unrecognized field name", "ENC[AES256_SIV,key:1,payload:AA==]"},
+		{"unsupported type", "ENC[AES256_SIV,key:1,data:AA==,type:date]"},
+		{"missing data field entirely", "ENC[AES256_SIV,key:1]"},
+		{"unrecognized algo", "ENC[ROT13,key:1,data:AA==]"},
+		{"missing suffix", "ENC[AES256_SIV,key:1,data:AA=="},
+		{"missing prefix", "AES256_SIV,key:1,data:AA==]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if LooksEncrypted([]byte(tt.raw)) {
+				t.Errorf("LooksEncrypted(%q) = true, want false", tt.raw)
+			}
+		})
+	}
+}
+
+// LooksEncrypted must still recognize every genuinely well-formed tag
+// shape as already-encrypted, including a keyless pre-rotation whole-file
+// tag (see the package doc comment and TestCleanLeavesLegacyWholeFileTagAlone
+// in internal/filterop) — the one case where it is deliberately more
+// lenient than a full Parse.
+func TestLooksEncryptedAcceptsWellFormedTagShapes(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{"whole-file tag", "ENC[AES256_SIV,key:1,data:c29tZXRoaW5n]"},
+		{"pre-rotation whole-file tag (no key field)", "ENC[AES256_SIV,data:c29tZXRoaW5n]"},
+		{"legacy value tag", "ENC[AES256_SIV,key:1,data:c29tZXRoaW5n,type:str]"},
+		{"type-bound value tag", "ENC[AES256_SIV_TB,key:1,data:c29tZXRoaW5n,type:int]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !LooksEncrypted([]byte(tt.raw)) {
+				t.Errorf("LooksEncrypted(%q) = false, want true", tt.raw)
+			}
+		})
+	}
+}

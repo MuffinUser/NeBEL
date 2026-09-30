@@ -171,36 +171,68 @@ func IsEncrypted(raw []byte) bool {
 }
 
 // LooksEncrypted reports whether raw is shaped like one of this package's
-// ENC[...] tags — delimiters present, and the first comma-separated field
-// naming a recognized algorithm — without requiring the rest of it
-// (notably "key:") to be present or well-formed.
+// ENC[...] tags: delimiters present, the first comma-separated field
+// naming a recognized algorithm, a genuine "data:" field whose payload
+// actually decodes as base64, and — for any other field present — a
+// recognized field name with a syntactically valid value. Unlike Parse,
+// the "key:" field is not required (see below), but every field that IS
+// present must be well-formed; an unrecognized or malformed field, or the
+// literal absence of any "data:" field at all, means raw is not a tag.
 //
-// This is deliberately more lenient than a full Parse: a pre-rotation tag
-// (this package's doc comment) has no "key:" field at all and fails Parse
-// for that reason alone, yet is genuine, already-encrypted content with
-// its own documented migration path (README's "Upgrading from a
-// pre-rotation repository"), not plaintext to encrypt over. LooksEncrypted
-// still recognizes it as "ours" so Clean/cleanValues leave it alone
-// (AC-6.4) instead of double-wrapping it — unlike the bare prefix check
-// IsEncrypted performs, which would also (wrongly) call a plaintext value
-// that merely starts with "ENC[" already-encrypted (audit 2026-09-29,
-// P08). Requiring a recognized algorithm name right after the prefix, plus
-// the closing "]", is enough to tell the two apart in practice: real
-// plaintext coincidentally matching that exact shape is far less likely
-// than merely starting with "ENC[".
+// This intentionally stops short of a full Parse in exactly one respect:
+// a pre-rotation tag (this package's doc comment) has no "key:" field at
+// all and fails Parse for that reason alone, yet is genuine,
+// already-encrypted content with its own documented migration path
+// (README's "Upgrading from a pre-rotation repository"), not plaintext to
+// encrypt over. LooksEncrypted still recognizes it as "ours" so
+// Clean/cleanValues leave it alone (AC-6.4) instead of double-wrapping it.
+//
+// Beyond that one deliberate exception, LooksEncrypted requires the same
+// field shapes Parse does: a value merely starting with "ENC[" plus a
+// recognized algorithm name, but otherwise malformed — e.g.
+// "ENC[AES256_SIV,not-a-real-tag]", which has no "data:" field at all — is
+// not treated as already-encrypted (audit 2026-09-30, R05). This is
+// stricter than the bare prefix check IsEncrypted performs, which would
+// also (wrongly) call a plaintext value that merely starts with "ENC["
+// already-encrypted (audit 2026-09-29, P08).
 func LooksEncrypted(raw []byte) bool {
 	s := string(raw)
 	if !strings.HasPrefix(s, prefix) || !strings.HasSuffix(s, suffix) {
 		return false
 	}
 	inner := s[len(prefix) : len(s)-len(suffix)]
-	algo, _, _ := strings.Cut(inner, ",")
-	switch algo {
+	fields := strings.Split(inner, ",")
+	if len(fields) < 2 || fields[0] == "" {
+		return false
+	}
+	switch fields[0] {
 	case AlgoAES256SIV, AlgoAES256SIVTypeBound:
-		return true
 	default:
 		return false
 	}
+
+	hasData := false
+	for _, field := range fields[1:] {
+		switch {
+		case strings.HasPrefix(field, "key:"):
+			version, err := strconv.Atoi(strings.TrimPrefix(field, "key:"))
+			if err != nil || version < 1 {
+				return false
+			}
+		case strings.HasPrefix(field, "data:"):
+			if _, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(field, "data:")); err != nil {
+				return false
+			}
+			hasData = true
+		case strings.HasPrefix(field, "type:"):
+			if !Type(strings.TrimPrefix(field, "type:")).Valid() {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return hasData
 }
 
 // Encode wraps ciphertext produced for a whole file into an ENC[...] tag,

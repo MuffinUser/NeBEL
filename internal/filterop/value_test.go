@@ -203,6 +203,34 @@ func TestValueRoundTripPreservesType(t *testing.T) {
 	}
 }
 
+// Regression/confirmation test for the 2026-09-30 reanalysis's finding
+// 4.4: validTypeLiteral now checks TypeFloat and TypeBool via
+// handler.RoundTrip instead of strconv directly (internal/format).
+// Legitimate float and bool values — the ones this test actually
+// round-trips — must still clean and smudge back out unchanged: RoundTrip
+// re-uses the exact same Locate/Render pair Clean and Smudge already
+// call, so anything Locate itself classified as float/bool round-trips by
+// construction, whatever literal forms that same lexer happens to accept.
+func TestCleanValuesRoundTripsGenuineFloatAndBool(t *testing.T) {
+	doc := "database:\n  active: true\n  rate: 3.14\n"
+	cfg := valueConfig("database.active", "database.rate")
+
+	cleaned, err := Clean(cfg, testKeyring, "config/staging.yaml", []byte(doc))
+	if err != nil {
+		t.Fatalf("Clean: %v", err)
+	}
+	if !strings.Contains(string(cleaned), "type:bool") || !strings.Contains(string(cleaned), "type:float") {
+		t.Errorf("bool/float type not recorded in the tag:\n%s", cleaned)
+	}
+	smudged, _, err := Smudge(cfg, testKeyring, "config/staging.yaml", cleaned)
+	if err != nil {
+		t.Fatalf("Smudge: %v", err)
+	}
+	if string(smudged) != doc {
+		t.Errorf("round trip changed the document:\n got  = %q\n want = %q", smudged, doc)
+	}
+}
+
 // AC-6.3: clean is deterministic, so re-staging an unchanged file produces
 // no diff.
 func TestCleanValuesIsDeterministic(t *testing.T) {
@@ -508,5 +536,41 @@ func TestSmudgeValuesRejectsNonLiteralAfterLegacyTypeFlip(t *testing.T) {
 	doc := strings.Replace(valueDoc, `password: "s3cr3t"`, `password: "`+tamperedTag+`"`, 1)
 	if _, _, err := Smudge(valueConfig(), testKeyring, "config/staging.yaml", []byte(doc)); !errors.Is(err, ErrInvalidTypeLiteral) {
 		t.Errorf("Smudge() error = %v, want %v", err, ErrInvalidTypeLiteral)
+	}
+}
+
+// Regression tests for the 2026-09-30 reanalysis's finding 4.4: Go's own
+// strconv parsers accept strings neither output format reads back as the
+// claimed type, so a legacy tag's unauthenticated type field could be
+// flipped onto one of these and still pass the old strconv-only check —
+// "NaN" is accepted by strconv.ParseFloat but isn't valid JSON/YAML float
+// syntax, and "1" is accepted by strconv.ParseBool but both formats read
+// it back as an int. Both must now be refused, the same as
+// TestSmudgeValuesRejectsNonLiteralAfterLegacyTypeFlip's ordinary-text
+// case, rather than rendered as invalid source or a silently wrong type.
+func TestSmudgeValuesRejectsStrconvPermissiveLiteralsAfterLegacyTypeFlip(t *testing.T) {
+	tests := []struct {
+		name        string
+		legacyValue string
+		newType     string
+	}{
+		{"NaN flipped to float", "NaN", "float"},
+		{"1 flipped to bool", "1", "bool"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			legacyAAD := siv.AAD(siv.ModeValue, "config/staging.yaml", "database.password")
+			ciphertext, err := siv.Encrypt(testKey, []byte(tt.legacyValue), legacyAAD)
+			if err != nil {
+				t.Fatalf("siv.Encrypt: %v", err)
+			}
+			legacyTag := fmt.Sprintf("ENC[%s,key:1,data:%s,type:str]", tag.AlgoAES256SIV, base64.StdEncoding.EncodeToString(ciphertext))
+			tamperedTag := strings.Replace(legacyTag, ",type:str]", ",type:"+tt.newType+"]", 1)
+
+			doc := strings.Replace(valueDoc, `password: "s3cr3t"`, `password: "`+tamperedTag+`"`, 1)
+			if _, _, err := Smudge(valueConfig(), testKeyring, "config/staging.yaml", []byte(doc)); !errors.Is(err, ErrInvalidTypeLiteral) {
+				t.Errorf("Smudge() error = %v, want %v", err, ErrInvalidTypeLiteral)
+			}
+		})
 	}
 }

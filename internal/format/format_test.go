@@ -689,3 +689,44 @@ func TestLeaves(t *testing.T) {
 		})
 	}
 }
+
+// Regression test for the 2026-09-30 reanalysis's finding 4.4: Go's
+// strconv parsers accept literal forms ("NaN", "Inf", "1" as a bool) that
+// neither JSON nor this package's YAML handler actually reads back as
+// the claimed type. RoundTrip is what validTypeLiteral (internal/filterop)
+// relies on instead of a standalone strconv check for TypeFloat/TypeBool.
+func TestHandlerRoundTrip(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		typ     tag.Type
+		wantErr bool
+	}{
+		{"genuine bool true", "true", tag.TypeBool, false},
+		{"genuine bool false", "false", tag.TypeBool, false},
+		{"genuine float", "3.14", tag.TypeFloat, false},
+		{"genuine negative float", "-0.5", tag.TypeFloat, false},
+		{"NaN claimed as float", "NaN", tag.TypeFloat, true},
+		{"Inf claimed as float", "Inf", tag.TypeFloat, true},
+		{"1 claimed as bool", "1", tag.TypeBool, true},
+		{"0 claimed as bool", "0", tag.TypeBool, true},
+		{"t claimed as bool", "t", tag.TypeBool, true},
+	}
+	for _, format := range []string{"x.json", "x.yaml"} {
+		h, err := For(format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tt := range tests {
+			t.Run(format+"/"+tt.name, func(t *testing.T) {
+				err := h.RoundTrip(tt.value, tt.typ)
+				if tt.wantErr && err == nil {
+					t.Errorf("RoundTrip(%q, %s) = nil, want an error", tt.value, tt.typ)
+				}
+				if !tt.wantErr && err != nil {
+					t.Errorf("RoundTrip(%q, %s) = %v, want nil", tt.value, tt.typ, err)
+				}
+			})
+		}
+	}
+}

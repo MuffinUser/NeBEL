@@ -175,6 +175,29 @@ func (jsonHandler) Render(value string, t tag.Type) (string, error) {
 	}
 }
 
+// RoundTrip embeds value, rendered as t, as the lone field of a minimal
+// JSON object and reads it back via Locate — see the Handler interface
+// doc comment for why this, rather than a standalone literal syntax
+// check, is what catches a historical legacy value tag (internal/tag)
+// whose unauthenticated type field was flipped to a type the literal
+// text doesn't actually support in JSON (e.g. "NaN" claimed as a float:
+// strconv.ParseFloat accepts it, but it isn't valid JSON number syntax).
+func (h jsonHandler) RoundTrip(value string, t tag.Type) error {
+	rendered, err := h.Render(value, t)
+	if err != nil {
+		return err
+	}
+	doc := []byte(`{"v":` + rendered + `}`)
+	span, err := h.Locate(doc, "v")
+	if err != nil {
+		return fmt.Errorf("%q does not read back as valid JSON: %w", rendered, err)
+	}
+	if span.Type != t || span.Value != value {
+		return fmt.Errorf("%q reads back as %s %q, not %s %q", rendered, span.Type, span.Value, t, value)
+	}
+	return nil
+}
+
 func delimName(d json.Delim) string {
 	if d == '{' {
 		return "object"

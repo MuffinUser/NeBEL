@@ -338,6 +338,30 @@ func (yamlHandler) Render(value string, t tag.Type) (string, error) {
 	}
 }
 
+// RoundTrip embeds value, rendered as t, as the lone field of a minimal
+// YAML mapping and reads it back via Locate — see the Handler interface
+// doc comment for why this, rather than a standalone literal syntax
+// check, is what catches a historical legacy value tag (internal/tag)
+// whose unauthenticated type field was flipped to a type the literal
+// text doesn't actually support in YAML (e.g. "1" claimed as a bool:
+// strconv.ParseBool accepts it, but YAML 1.1 reads a bare "1" back as an
+// int, not one of its recognized boolean literals).
+func (h yamlHandler) RoundTrip(value string, t tag.Type) error {
+	rendered, err := h.Render(value, t)
+	if err != nil {
+		return err
+	}
+	doc := []byte("v: " + rendered + "\n")
+	span, err := h.Locate(doc, "v")
+	if err != nil {
+		return fmt.Errorf("%q does not read back as valid YAML: %w", rendered, err)
+	}
+	if span.Type != t || span.Value != value {
+		return fmt.Errorf("%q reads back as %s %q, not %s %q", rendered, span.Type, span.Value, t, value)
+	}
+	return nil
+}
+
 // ErrControlCharacterUnsupported is returned by Render when a decrypted
 // string contains a control character this build cannot safely render
 // into a YAML double-quoted scalar — see yamlEscapeDoubleQuoted.

@@ -94,6 +94,25 @@ type Handler interface {
 	// yamlHandler.Render's doc comment for the one case that applies today
 	// (audit 2026-09-29, P10).
 	Render(value string, t tag.Type) (string, error)
+
+	// RoundTrip reports an error unless rendering value as t, then
+	// reading that rendered text back via Locate, recovers exactly value
+	// and t again. This is what validTypeLiteral (internal/filterop)
+	// uses to decide whether a historical, type-flipped legacy value tag
+	// (see internal/tag's doc comment on AlgoAES256SIV's unauthenticated
+	// type field) is safe to render: a value accepted by Go's own
+	// strconv parsers is not necessarily one this format's own parser
+	// would read back the same way — strconv.ParseFloat accepts "NaN",
+	// which is not a value either JSON or this package's YAML handler
+	// recognizes as a float, and strconv.ParseBool accepts "1", which
+	// both formats read back as an int rather than a bool. Checking
+	// round-trip fidelity against each format's own parser catches both
+	// without needing a hand-maintained catalogue of every way a format's
+	// accepted literals are stricter than Go's (audit 2026-09-30,
+	// reanalysis 4.4). A value Clean or Smudge actually produced always
+	// round-trips, by construction, so this never rejects legitimate
+	// content.
+	RoundTrip(value string, t tag.Type) error
 }
 
 // Leaf is one scalar in a document, addressable by Path.

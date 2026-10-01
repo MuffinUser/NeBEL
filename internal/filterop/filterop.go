@@ -331,29 +331,32 @@ var ErrInvalidTypeLiteral = errors.New("filterop: decrypted value is not a valid
 // passes: Render quotes it, so whatever bytes it contains stay inert data
 // rather than becoming unquoted source syntax.
 //
-// TypeInt additionally enforces signed 64-bit range via strconv, a scope
-// limit this tool chooses rather than one either output format imposes
-// (audit 2026-09-30, R06's int64-overflow case) — handler.RoundTrip alone
+// Every non-string type is checked by handler.RoundTrip rather than by
+// strconv alone: strconv.ParseFloat accepts "NaN"/"Inf"/hex floats,
+// strconv.ParseBool accepts "1"/"t"/"T" and more, and strconv.ParseInt
+// accepts a leading "+" or leading zeros ("+5", "007") — none of which
+// both output formats read back as the claimed type (audit 2026-09-30,
+// reanalysis 4.4; see the Handler.RoundTrip doc comment).
+//
+// TypeInt additionally keeps its strconv check, for signed 64-bit range: a
+// scope limit this tool chooses rather than one either output format
+// imposes (audit 2026-09-30, R06's int64-overflow case). RoundTrip alone
 // wouldn't catch it, since JSON has no defined integer range and this
 // package's YAML handler classifies by the lexer's own token type, not a
 // numeric range check.
-//
-// TypeFloat and TypeBool are checked by handler.RoundTrip instead of
-// strconv directly: strconv.ParseFloat accepts "NaN"/"Inf"/hex floats,
-// and strconv.ParseBool accepts "1"/"t"/"T" and more, none of which
-// either output format reads back as the claimed type (audit 2026-09-30,
-// reanalysis 4.4 — see the Handler.RoundTrip doc comment for the concrete
-// examples this closes).
 func validTypeLiteral(handler format.Handler, value string, t tag.Type) error {
 	switch t {
-	case tag.TypeInt:
+	case tag.TypeInt, tag.TypeFloat, tag.TypeBool:
+	default:
+		return nil
+	}
+	if t == tag.TypeInt {
 		if _, err := strconv.ParseInt(value, 10, 64); err != nil {
 			return fmt.Errorf("%w: %q is not a valid %s: %v", ErrInvalidTypeLiteral, value, t, err)
 		}
-	case tag.TypeFloat, tag.TypeBool:
-		if err := handler.RoundTrip(value, t); err != nil {
-			return fmt.Errorf("%w: %q is not a valid %s: %v", ErrInvalidTypeLiteral, value, t, err)
-		}
+	}
+	if err := handler.RoundTrip(value, t); err != nil {
+		return fmt.Errorf("%w: %q is not a valid %s: %v", ErrInvalidTypeLiteral, value, t, err)
 	}
 	return nil
 }

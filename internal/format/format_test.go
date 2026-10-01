@@ -711,6 +711,9 @@ func TestHandlerRoundTrip(t *testing.T) {
 		{"1 claimed as bool", "1", tag.TypeBool, true},
 		{"0 claimed as bool", "0", tag.TypeBool, true},
 		{"t claimed as bool", "t", tag.TypeBool, true},
+		{"genuine int", "42", tag.TypeInt, false},
+		{"genuine negative int", "-7", tag.TypeInt, false},
+		{"leading zero claimed as int", "007", tag.TypeInt, true},
 	}
 	for _, format := range []string{"x.json", "x.yaml"} {
 		h, err := For(format)

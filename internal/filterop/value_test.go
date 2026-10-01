@@ -556,6 +556,7 @@ func TestSmudgeValuesRejectsStrconvPermissiveLiteralsAfterLegacyTypeFlip(t *test
 	}{
 		{"NaN flipped to float", "NaN", "float"},
 		{"1 flipped to bool", "1", "bool"},
+		{"leading zero flipped to int", "007", "int"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -572,5 +573,28 @@ func TestSmudgeValuesRejectsStrconvPermissiveLiteralsAfterLegacyTypeFlip(t *test
 				t.Errorf("Smudge() error = %v, want %v", err, ErrInvalidTypeLiteral)
 			}
 		})
+	}
+}
+
+// Companion to TestSmudgeValuesRejectsStrconvPermissiveLiteralsAfterLegacyTypeFlip
+// for a JSON document: strconv.ParseInt accepts a leading "+", and YAML
+// reads "+5" back as an int, but it isn't valid JSON number syntax, so a
+// legacy tag flipped from str to int must not render it unquoted into a
+// JSON document (audit 2026-09-30, reanalysis 4.4).
+func TestSmudgeValuesRejectsPlusSignedIntInJSONAfterLegacyTypeFlip(t *testing.T) {
+	const legacyValue = "+5"
+	cfg := &config.Config{Rules: []config.Rule{
+		{Files: "config/*.json", Mode: config.ModeValue, Encrypt: []string{"secret"}},
+	}}
+	legacyAAD := siv.AAD(siv.ModeValue, "config/staging.json", "secret")
+	ciphertext, err := siv.Encrypt(testKey, []byte(legacyValue), legacyAAD)
+	if err != nil {
+		t.Fatalf("siv.Encrypt: %v", err)
+	}
+	tamperedTag := fmt.Sprintf("ENC[%s,key:1,data:%s,type:int]", tag.AlgoAES256SIV, base64.StdEncoding.EncodeToString(ciphertext))
+
+	doc := `{"secret": "` + tamperedTag + `"}`
+	if _, _, err := Smudge(cfg, testKeyring, "config/staging.json", []byte(doc)); !errors.Is(err, ErrInvalidTypeLiteral) {
+		t.Errorf("Smudge() error = %v, want %v", err, ErrInvalidTypeLiteral)
 	}
 }

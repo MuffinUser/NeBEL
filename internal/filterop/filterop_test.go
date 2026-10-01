@@ -52,7 +52,7 @@ func TestCleanIsIdempotent(t *testing.T) {
 // AC-6.4: clean run on input that is already a well-formed ENC[...] tag
 // leaves it unchanged rather than double-encrypting.
 func TestCleanSkipsAlreadyEncrypted(t *testing.T) {
-	already := tag.Encode([]byte("some-ciphertext"), 1)
+	already := tag.Encode([]byte("some-ciphertext-16-bytes-plus"), 1)
 	got, err := Clean(testConfig(), testKeyring, "secrets/prod.pem", []byte(already))
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
@@ -85,7 +85,7 @@ func TestCleanEncryptsPlaintextStartingWithEncPrefix(t *testing.T) {
 // double-wrapped: LooksEncrypted is deliberately more lenient than a bare
 // prefix check specifically so this legacy shape still counts as "ours".
 func TestCleanLeavesLegacyWholeFileTagAlone(t *testing.T) {
-	legacy := "ENC[AES256_SIV,data:c29tZXRoaW5n]"
+	legacy := "ENC[AES256_SIV,data:c2l4dGVlbi1ieXRlLWNpcGhlcnRleHQtcGxhY2Vob2xkZXI=]"
 	got, err := Clean(testConfig(), testKeyring, "secrets/prod.pem", []byte(legacy))
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
@@ -103,7 +103,7 @@ func TestCleanLeavesLegacyWholeFileTagAlone(t *testing.T) {
 // from hard-failing on a clone that's fallen behind a rotation it hasn't
 // rejoined yet.
 func TestCleanWholeFileNoKeyNeededWhenAlreadyEncrypted(t *testing.T) {
-	already := tag.Encode([]byte("some-ciphertext"), 1)
+	already := tag.Encode([]byte("some-ciphertext-16-bytes-plus"), 1)
 	got, err := Clean(configAtVersion(2), Keyring{}, "secrets/prod.pem", []byte(already))
 	if err != nil {
 		t.Fatalf("Clean() with no keys registered: want success (nothing to encrypt), got %v", err)

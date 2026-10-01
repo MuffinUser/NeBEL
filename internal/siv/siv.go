@@ -21,6 +21,15 @@ import (
 // 256-bit subkeys, derived from this single 512-bit key.
 const KeySize = 64
 
+// MinCiphertextLen is the smallest possible output of Encrypt: RFC 5297's
+// synthetic IV is itself 16 bytes, prepended to the (possibly zero-length,
+// for an empty plaintext) encrypted data. No genuine ciphertext this
+// package ever produces can be shorter — a decoded "data:" field below
+// this length in an ENC[...] tag cannot be real SIV output (internal/tag's
+// LooksEncrypted relies on this to reject tags shaped like an
+// already-encrypted value around implausibly short or empty payloads).
+const MinCiphertextLen = 16
+
 // Mode is the encryption granularity a rule applies to a file.
 type Mode string
 

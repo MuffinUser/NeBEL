@@ -72,6 +72,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/MuffinUser/nebel/internal/siv"
 )
 
 // AlgoAES256SIV is the algorithm identifier for a whole-file tag, and for
@@ -170,25 +172,29 @@ func IsEncrypted(raw []byte) bool {
 	return strings.HasPrefix(string(raw), prefix)
 }
 
-// LooksEncrypted reports whether raw is shaped like one of this package's
-// ENC[...] tags: delimiters present, the first comma-separated field
-// naming a recognized algorithm, a genuine "data:" field whose payload
-// actually decodes as base64, and — for any other field present — a
-// recognized field name with a syntactically valid value. Unlike Parse,
-// the "key:" field is not required (see below), but every field that IS
-// present must be well-formed; an unrecognized or malformed field, or the
-// literal absence of any "data:" field at all, means raw is not a tag.
+// LooksEncrypted reports whether raw is a tag this package would itself
+// produce or still accept: it shares Parse's exact grammar — algorithm,
+// then an ordered key/data/type field sequence with no duplicates, no
+// trailing garbage, and a "data:" payload that both decodes as base64 and
+// is long enough to be genuine SIV output (internal/siv.MinCiphertextLen)
+// — relaxed in exactly one respect: a pre-rotation tag (this package's doc
+// comment) has no "key:" field at all, fails Parse for that reason alone,
+// and is still genuine, already-encrypted content with its own documented
+// migration path (README's "Upgrading from a pre-rotation repository"),
+// not plaintext to encrypt over. LooksEncrypted still recognizes it as
+// "ours" so Clean/cleanValues leave it alone (AC-6.4) instead of
+// double-wrapping it. AlgoAES256SIVTypeBound postdates key rotation (it
+// didn't exist before rotation introduced the "key:" field), so that
+// relaxation applies only to AlgoAES256SIV — a type-bound tag always needs
+// one.
 //
-// This intentionally stops short of a full Parse in exactly one respect:
-// a pre-rotation tag (this package's doc comment) has no "key:" field at
-// all and fails Parse for that reason alone, yet is genuine,
-// already-encrypted content with its own documented migration path
-// (README's "Upgrading from a pre-rotation repository"), not plaintext to
-// encrypt over. LooksEncrypted still recognizes it as "ours" so
-// Clean/cleanValues leave it alone (AC-6.4) instead of double-wrapping it.
-//
-// Beyond that one deliberate exception, LooksEncrypted requires the same
-// field shapes Parse does: a value merely starting with "ENC[" plus a
+// Sharing Parse's grammar (rather than re-validating each field
+// independently) is what rejects a duplicated or reordered field, a
+// "data:" field decoding to too little ciphertext to be real, or a
+// type-bound tag with no type field — forms the previous, per-field
+// validation accepted as already-encrypted even though they were never a
+// tag this package could have produced or could ever decrypt (audit
+// 2026-09-30, reanalysis 4.2). A value merely starting with "ENC[" plus a
 // recognized algorithm name, but otherwise malformed — e.g.
 // "ENC[AES256_SIV,not-a-real-tag]", which has no "data:" field at all — is
 // not treated as already-encrypted (audit 2026-09-30, R05). This is
@@ -196,43 +202,11 @@ func IsEncrypted(raw []byte) bool {
 // also (wrongly) call a plaintext value that merely starts with "ENC["
 // already-encrypted (audit 2026-09-29, P08).
 func LooksEncrypted(raw []byte) bool {
-	s := string(raw)
-	if !strings.HasPrefix(s, prefix) || !strings.HasSuffix(s, suffix) {
+	parsed, err := parse(string(raw), true)
+	if err != nil {
 		return false
 	}
-	inner := s[len(prefix) : len(s)-len(suffix)]
-	fields := strings.Split(inner, ",")
-	if len(fields) < 2 || fields[0] == "" {
-		return false
-	}
-	switch fields[0] {
-	case AlgoAES256SIV, AlgoAES256SIVTypeBound:
-	default:
-		return false
-	}
-
-	hasData := false
-	for _, field := range fields[1:] {
-		switch {
-		case strings.HasPrefix(field, "key:"):
-			version, err := strconv.Atoi(strings.TrimPrefix(field, "key:"))
-			if err != nil || version < 1 {
-				return false
-			}
-		case strings.HasPrefix(field, "data:"):
-			if _, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(field, "data:")); err != nil {
-				return false
-			}
-			hasData = true
-		case strings.HasPrefix(field, "type:"):
-			if !Type(strings.TrimPrefix(field, "type:")).Valid() {
-				return false
-			}
-		default:
-			return false
-		}
-	}
-	return hasData
+	return len(parsed.Ciphertext) >= siv.MinCiphertextLen
 }
 
 // Encode wraps ciphertext produced for a whole file into an ENC[...] tag,
@@ -278,6 +252,17 @@ func Decode(raw string) ([]byte, error) {
 // tag names its own version explicitly, and the caller (spec 06) is
 // responsible for finding the matching key in the local keyring.
 func Parse(raw string) (Tag, error) {
+	return parse(raw, false)
+}
+
+// parse implements the grammar both Parse and LooksEncrypted share.
+// keyOptional relaxes only the "key:" field requirement, and only for
+// AlgoAES256SIV — see LooksEncrypted's doc comment for why. Every other
+// rule (field order, no duplicates, no trailing fields, a well-formed
+// "data:" payload) applies identically either way, so a tag shape
+// LooksEncrypted accepts is always one Parse would too, once it also
+// carries a "key:" field.
+func parse(raw string, keyOptional bool) (Tag, error) {
 	if !strings.HasPrefix(raw, prefix) || !strings.HasSuffix(raw, suffix) {
 		return Tag{}, fmt.Errorf("%w: missing %q...%q delimiters", ErrMalformed, prefix, suffix)
 	}
@@ -303,14 +288,24 @@ func Parse(raw string) (Tag, error) {
 	}
 	rest := fields[1:]
 
-	keyField, rest := rest[0], rest[1:]
-	keyValue, ok := strings.CutPrefix(keyField, "key:")
-	if !ok {
+	// AlgoAES256SIVTypeBound postdates key rotation (it didn't exist
+	// before "key:" did), so it never qualifies for the keyless
+	// pre-rotation exception below, whatever the caller asked for.
+	var version int
+	if len(rest) > 0 && strings.HasPrefix(rest[0], "key:") {
+		keyValue := strings.TrimPrefix(rest[0], "key:")
+		v, err := strconv.Atoi(keyValue)
+		if err != nil || v < 1 {
+			return Tag{}, fmt.Errorf("%w: invalid key version %q", ErrMalformed, keyValue)
+		}
+		version = v
+		rest = rest[1:]
+	} else if !keyOptional || typeBound {
+		keyField := ""
+		if len(rest) > 0 {
+			keyField = rest[0]
+		}
 		return Tag{}, fmt.Errorf("%w: expected a \"key:\" field, got %q", ErrMalformed, keyField)
-	}
-	version, err := strconv.Atoi(keyValue)
-	if err != nil || version < 1 {
-		return Tag{}, fmt.Errorf("%w: invalid key version %q", ErrMalformed, keyValue)
 	}
 
 	if len(rest) == 0 {

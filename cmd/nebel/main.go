@@ -61,8 +61,9 @@ func usage() {
                                  encrypt named values inside <file>;
                                  with no paths, choose them interactively
   nebel rotate [--password-stdin]
-                                 mint a new, current key version; does not
-                                 touch already-encrypted content
+                                 mint a new, current key version and
+                                 eagerly re-encrypt everything managed
+                                 under it
   nebel clean <path>         (invoked by git) encrypt stdin to stdout
   nebel smudge <path>        (invoked by git) decrypt stdin to stdout
   nebel version              print the build version`)

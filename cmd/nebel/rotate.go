@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -39,6 +40,40 @@ func runRotate(args []string) error {
 	configPath := filepath.Join(root, config.FileName)
 	if !config.Exists(configPath) {
 		return fmt.Errorf("no %s found — run `nebel init` first", config.FileName)
+	}
+
+	// Serializes this entire operation against another concurrent `nebel
+	// rotate` in the same clone (audit 2026-09-30, reanalysis 4.3): without
+	// it, two runs could both read the same current version below and each
+	// mint the same next one with a different key. See LockRotation's doc
+	// comment. Acquired before originalConfigBytes is even read, so a
+	// concurrent rotate can't change configPath out from under that
+	// snapshot between reading it and this one finishing.
+	unlockRotation, err := localkey.LockRotation()
+	if err != nil {
+		return err
+	}
+	defer unlockRotation()
+
+	// Captured before anything changes, so a failure partway through can
+	// restore configPath to exactly this — not necessarily HEAD's content:
+	// AC-11.9 lets `rotate` run again before the previous rotation is even
+	// committed, in which case this is that still-staged, uncommitted
+	// result, and HEAD would be one rotation further back than what a
+	// failed retry needs to revert to (audit 2026-09-30, reanalysis 4.1).
+	originalConfigBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", config.FileName, err)
+	}
+	// The index entry alongside it, for the same reason but the index
+	// half: restoring it later via SetIndexEntry, rather than re-running
+	// Add against whatever the working tree holds by then, is what keeps
+	// a revert from staging a pre-existing unstaged edit to configPath
+	// that predates this rotate attempt entirely (audit 2026-09-30,
+	// reanalysis 4.1).
+	originalConfigIndex, haveOriginalConfigIndex, err := gitutil.IndexEntry(root, config.FileName)
+	if err != nil {
+		return err
 	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -131,15 +166,38 @@ func runRotate(args []string) error {
 		return fmt.Errorf("internal error: freshly created canary did not verify: %w", err)
 	}
 
+	// Captured so a failed attempt can put the keyring back exactly how it
+	// found it (rotateAttempt.failure): newVersion almost never already
+	// has a locally-registered key at this point, but if it somehow does
+	// (e.g. `nebel init --version N` fetched it out of band before this
+	// clone's own rotate happened to mint the same number), Set below
+	// would silently overwrite it, and simply deleting it on revert would
+	// be just as wrong as leaving this attempt's own key behind.
+	prevKey, hadPrevKey, err := localkey.Get(newVersion)
+	if err != nil {
+		return fmt.Errorf("reading local key: %w", err)
+	}
+
 	// AC-11.5: register the new key before saving the config. If the
 	// config write below failed after this, this machine would still be
 	// able to clean under the new version on retry; the reverse order
 	// could leave a saved config this machine can't yet use.
+	attempt := rotateAttempt{
+		root:              root,
+		configPath:        configPath,
+		originalBytes:     originalConfigBytes,
+		originalIndex:     originalConfigIndex,
+		haveOriginalIndex: haveOriginalConfigIndex,
+		newVersion:        newVersion,
+		prevKey:           prevKey,
+		hadPrevKey:        hadPrevKey,
+		generated:         generated,
+	}
 	if err := localkey.Set(newVersion, newKey); err != nil {
 		return fmt.Errorf("registering local key: %w", err)
 	}
 	if err := next.Save(configPath); err != nil {
-		return rotateRecoveryHint(err)
+		return attempt.failure(false, err)
 	}
 
 	// Stage the config, then eagerly re-encrypt every managed file/field
@@ -150,34 +208,121 @@ func runRotate(args []string) error {
 	// reaches everything: nothing left encrypted going in means nothing
 	// comes out still tagged with the old version.
 	if err := gitutil.Add(root, config.FileName); err != nil {
-		return rotateRecoveryHint(err)
+		return attempt.failure(false, err)
 	}
 	migrated, err := gitutil.RenormalizeAll(root)
 	if err != nil {
-		return rotateRecoveryHint(fmt.Errorf("re-encrypting existing content under the new version: %w", err))
+		return attempt.failure(true, fmt.Errorf("re-encrypting existing content under the new version: %w", err))
 	}
 
 	printRotateSummary(newVersion, migrated)
 	return nil
 }
 
-// rotateRecoveryHint explains how to undo a rotation that failed partway
-// through registering the new config or re-encrypting content under it
-// (audit 2026-09-30, R03). Nothing runRotate does reaches this point is
-// ever committed — only the working tree and the index change — so a
-// plain git command already fully reverts it; no separate rollback
-// mechanism is needed. Re-running `nebel rotate` also works without first
-// reverting anything: eager re-encryption is idempotent (spec 11 AC-11.10)
-// and Set/Save both tolerate being called again with the same or a fresh
-// version, so a retry converges the rest instead of leaving anything
-// half-migrated — it just mints another version in the process.
-func rotateRecoveryHint(err error) error {
-	return fmt.Errorf("%w\n\nNothing from this rotation has been committed yet — "+
-		"`git checkout -- .` (or `git reset --hard HEAD`, if you have no other "+
-		"uncommitted changes) fully discards it. Or leave it as-is, fix the "+
-		"underlying problem, and re-run `nebel rotate`: re-encryption is "+
-		"idempotent, so it converges the rest instead of leaving anything "+
-		"half-migrated.", err)
+// rotateAttempt carries what a single runRotate call needs to revert
+// itself if it fails partway through (audit 2026-09-30, reanalysis 4.1
+// and 4.3).
+type rotateAttempt struct {
+	root, configPath string
+
+	// originalBytes is configPath's exact content the instant runRotate
+	// started — not necessarily HEAD's: AC-11.9 lets `rotate` run again
+	// before a previous rotation is even committed, in which case this is
+	// that still-staged, uncommitted result, and HEAD would be one
+	// rotation further back than what a failed retry needs to revert to.
+	originalBytes []byte
+
+	// originalIndex is configPath's index entry ("<mode>,<sha>", see
+	// gitutil.IndexEntry) at the same instant, restored via
+	// gitutil.SetIndexEntry rather than re-running Add so a revert never
+	// stages whatever happens to be in the working tree by the time it
+	// runs — including a pre-existing unstaged edit to configPath that
+	// predates this attempt and was never staged in the first place.
+	originalIndex     string
+	haveOriginalIndex bool
+
+	newVersion int
+
+	// prevKey/hadPrevKey is whatever localkey.Get(newVersion) returned
+	// right before this attempt's own localkey.Set(newVersion, ...) —
+	// almost always hadPrevKey == false, since newVersion doesn't exist
+	// yet anywhere else. Restoring exactly this (Set it back, or Remove
+	// if there was nothing) rather than unconditionally removing
+	// newVersion is what keeps a revert from erasing a key some other,
+	// unrelated process had already legitimately registered for that
+	// same version number.
+	prevKey    []byte
+	hadPrevKey bool
+
+	generated bool
+}
+
+// failure reverts configPath and the local keyring back to what they held
+// before this attempt, and reports cause alongside what that revert did.
+// staged must be true only when this attempt's own gitutil.Add already
+// staged configPath before the failure being reported — i.e. only for the
+// gitutil.RenormalizeAll failure point, not next.Save's or gitutil.Add's
+// own.
+//
+// Nothing runRotate does before the point this is called from is ever
+// committed, and no managed file's working tree or index state is ever
+// touched by any of its three failure points: `git add --renormalize`
+// only stages a managed file when it succeeds for every path in that
+// single invocation (verified empirically — git aborts the whole index
+// update on the first filter failure), so a failure there leaves every
+// managed file exactly as it was. Only configPath and the local keyring
+// entry for newVersion ever need undoing.
+//
+// Restoring the keyring matters beyond tidiness: without it, this
+// attempt's orphaned key for newVersion stays registered after the
+// revert. If the user doesn't retry, and a teammate's own, independent
+// rotation later succeeds in minting that same version number with a
+// *different* key, this clone's next `git pull` finds a version its
+// keyring already claims to have a key for — Smudge's AC-6.11 passthrough
+// only applies to a version the keyring doesn't hold at all, so instead of
+// the usual graceful "missing key" passthrough, decryption fails outright
+// with a hard authentication error (audit 2026-09-30, reanalysis 4.3).
+func (a rotateAttempt) failure(staged bool, cause error) error {
+	passwordNote := ""
+	if a.generated {
+		passwordNote = " The password shown above was never applied to anything — discard it; a retry generates a new one."
+	}
+	if err := os.WriteFile(a.configPath, a.originalBytes, 0o644); err != nil {
+		if a.generated {
+			passwordNote = fmt.Sprintf(" %s's working tree copy may still hold the new, uncommitted version the password shown above applies to — keep that password until you've confirmed what %[1]s actually contains.", config.FileName)
+		}
+		return fmt.Errorf("%w\n\nAdditionally, restoring %s to what it held before this attempt failed: %v.%s Rewrite it by hand before retrying.",
+			cause, config.FileName, err, passwordNote)
+	}
+	if staged {
+		if !a.haveOriginalIndex {
+			return fmt.Errorf("%w\n\n%s's working tree copy was restored, but it was not tracked in the index before this "+
+				"attempt started, so the now-stale staged version can't be restored automatically — run `git rm --cached -- %s` "+
+				"by hand before retrying.%s", cause, config.FileName, config.FileName, passwordNote)
+		}
+		if err := gitutil.SetIndexEntry(a.root, a.originalIndex, config.FileName); err != nil {
+			return fmt.Errorf("%w\n\n%s's working tree copy was restored, but re-staging its prior version failed: %v — "+
+				"run `git add -- %s` by hand before retrying, so the index doesn't still hold the new version (this may "+
+				"also re-stage any of your own unrelated pending edit to it).%s",
+				cause, config.FileName, err, config.FileName, passwordNote)
+		}
+	}
+	if a.hadPrevKey {
+		if err := localkey.Set(a.newVersion, a.prevKey); err != nil {
+			return fmt.Errorf("%w\n\n%s was fully reverted, but restoring version %d's previous local key failed: %v — "+
+				"run `nebel init --version %d` again by hand before retrying.%s",
+				cause, config.FileName, a.newVersion, err, a.newVersion, passwordNote)
+		}
+	} else if err := localkey.Remove(a.newVersion); err != nil {
+		return fmt.Errorf("%w\n\n%s was fully reverted, but removing the orphaned local key this attempt registered "+
+			"for version %d failed: %v — if a teammate's own rotation later mints that same version with a different "+
+			"key, this clone's next `git pull` will hard-fail on it instead of the usual graceful passthrough, until "+
+			"that stale entry is removed by hand.%s", cause, config.FileName, a.newVersion, err, passwordNote)
+	}
+	return fmt.Errorf("%w\n\nThis rotation attempt was automatically reverted: %s and the local keyring are both "+
+		"back to what they held before this attempt, and no managed file was ever touched.%s Fix the problem above, "+
+		"then re-run `nebel rotate`; it will mint version %[4]d again, with a newly generated key, not this "+
+		"attempt's.", cause, config.FileName, passwordNote, a.newVersion)
 }
 
 // printGeneratedPasswordNotice reports an auto-generated password the

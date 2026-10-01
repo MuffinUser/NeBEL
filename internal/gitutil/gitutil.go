@@ -87,6 +87,46 @@ func Add(repoRoot string, paths ...string) error {
 	return nil
 }
 
+// IndexEntry returns path's current index entry as "<mode>,<sha>" — enough
+// for SetIndexEntry to restore it exactly later — and ok=false if path
+// isn't currently tracked in the index at all. Unlike indexBlobs (which
+// renormalize's before/after diff only needs the hash from, to detect a
+// change), a full restoration via `git update-index --cacheinfo` needs
+// the mode too.
+func IndexEntry(repoRoot, path string) (modeSHA string, ok bool, err error) {
+	cmd := exec.Command("git", "ls-files", "-s", "-z", "--", path)
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false, fmt.Errorf("gitutil: git ls-files -s: %w", wrapExitErr(err))
+	}
+	record := strings.TrimRight(string(out), "\x00")
+	if record == "" {
+		return "", false, nil
+	}
+	meta, _, cut := strings.Cut(record, "\t")
+	fields := strings.Fields(meta)
+	if !cut || len(fields) < 2 {
+		return "", false, fmt.Errorf("gitutil: unexpected `git ls-files -s` output for %s: %q", path, record)
+	}
+	return fields[0] + "," + fields[1], true, nil
+}
+
+// SetIndexEntry restores path's index entry to modeSHA (as returned by
+// IndexEntry), independent of path's current working tree content —
+// unlike Add, which stages whatever the working tree currently holds.
+// Used by `nebel rotate` to undo its own Add on a later failure without
+// disturbing an unrelated edit already sitting in the working tree when
+// rotate started (audit 2026-09-30, reanalysis 4.1).
+func SetIndexEntry(repoRoot, modeSHA, path string) error {
+	cmd := exec.Command("git", "update-index", "--cacheinfo", modeSHA+","+path)
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("gitutil: git update-index --cacheinfo: %w: %s", wrapExitErr(err), strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // indexBlobs maps each of paths to its current staged blob hash, via
 // `git ls-files -s -z`. A path with nothing tracked at it is simply
 // absent from the result rather than being an error.

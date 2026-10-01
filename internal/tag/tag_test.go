@@ -256,6 +256,17 @@ func TestLooksEncryptedRejectsMalformedTagShapes(t *testing.T) {
 		{"unrecognized algo", "ENC[ROT13,key:1,data:AA==]"},
 		{"missing suffix", "ENC[AES256_SIV,key:1,data:AA=="},
 		{"missing prefix", "AES256_SIV,key:1,data:AA==]"},
+
+		// Regression tests for the 2026-09-30 reanalysis's finding 4.2:
+		// the old per-field validation accepted all four of these as
+		// already-encrypted, even though none of them is a tag this
+		// package ever produced or could decrypt. A plaintext value that
+		// happened to look like one of these would have been committed
+		// unencrypted.
+		{"empty data field", "ENC[AES256_SIV,data:]"},
+		{"duplicate data field", "ENC[AES256_SIV,data:AAAA,data:AAAA]"},
+		{"type-bound tag missing its mandatory key field", "ENC[AES256_SIV_TB,data:AAAA]"},
+		{"data too short to be genuine SIV output", "ENC[AES256_SIV,key:1,data:AAAA]"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -276,10 +287,13 @@ func TestLooksEncryptedAcceptsWellFormedTagShapes(t *testing.T) {
 		name string
 		raw  string
 	}{
-		{"whole-file tag", "ENC[AES256_SIV,key:1,data:c29tZXRoaW5n]"},
-		{"pre-rotation whole-file tag (no key field)", "ENC[AES256_SIV,data:c29tZXRoaW5n]"},
-		{"legacy value tag", "ENC[AES256_SIV,key:1,data:c29tZXRoaW5n,type:str]"},
-		{"type-bound value tag", "ENC[AES256_SIV_TB,key:1,data:c29tZXRoaW5n,type:int]"},
+		// The base64 below decodes to 36 bytes — long enough to pass as
+		// genuine SIV output (internal/siv.MinCiphertextLen), unlike a
+		// short placeholder such as "something".
+		{"whole-file tag", "ENC[AES256_SIV,key:1,data:c2l4dGVlbi1ieXRlLWNpcGhlcnRleHQtcGxhY2Vob2xkZXI=]"},
+		{"pre-rotation whole-file tag (no key field)", "ENC[AES256_SIV,data:c2l4dGVlbi1ieXRlLWNpcGhlcnRleHQtcGxhY2Vob2xkZXI=]"},
+		{"legacy value tag", "ENC[AES256_SIV,key:1,data:c2l4dGVlbi1ieXRlLWNpcGhlcnRleHQtcGxhY2Vob2xkZXI=,type:str]"},
+		{"type-bound value tag", "ENC[AES256_SIV_TB,key:1,data:c2l4dGVlbi1ieXRlLWNpcGhlcnRleHQtcGxhY2Vob2xkZXI=,type:int]"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

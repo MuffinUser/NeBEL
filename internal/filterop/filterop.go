@@ -211,7 +211,7 @@ func cleanValues(rule config.Rule, version int, key []byte, haveKey bool, filePa
 		// `nebel add`/`git add`/renormalize instead of ciphertext already
 		// committed to git that no future smudge can turn back into the
 		// original value (audit 2026-09-30, R06).
-		if err := validTypeLiteral(span.Value, span.Type); err != nil {
+		if err := validTypeLiteral(handler, span.Value, span.Type); err != nil {
 			return nil, fmt.Errorf("filterop: clean %s at %s: value cannot be safely restored later: %w", filePath, field, err)
 		}
 		if _, err := handler.Render(span.Value, span.Type); err != nil {
@@ -308,7 +308,7 @@ func smudgeValues(rule config.Rule, keyring Keyring, filePath string, input []by
 		// structure into the surrounding document. A type-bound tag can't
 		// reach this in practice (its type can't change without failing
 		// the Decrypt above), so this never rejects legitimate content.
-		if err := validTypeLiteral(string(plaintext), parsed.Type); err != nil {
+		if err := validTypeLiteral(handler, string(plaintext), parsed.Type); err != nil {
 			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, err)
 		}
 		rendered, err := handler.Render(string(plaintext), parsed.Type)
@@ -330,18 +330,33 @@ var ErrInvalidTypeLiteral = errors.New("filterop: decrypted value is not a valid
 // int/float/bool literal before it gets rendered unquoted. TypeStr always
 // passes: Render quotes it, so whatever bytes it contains stay inert data
 // rather than becoming unquoted source syntax.
-func validTypeLiteral(value string, t tag.Type) error {
-	var err error
+//
+// Every non-string type is checked by handler.RoundTrip rather than by
+// strconv alone: strconv.ParseFloat accepts "NaN"/"Inf"/hex floats,
+// strconv.ParseBool accepts "1"/"t"/"T" and more, and strconv.ParseInt
+// accepts a leading "+" or leading zeros ("+5", "007") — none of which
+// both output formats read back as the claimed type (audit 2026-09-30,
+// reanalysis 4.4; see the Handler.RoundTrip doc comment).
+//
+// TypeInt additionally keeps its strconv check, for signed 64-bit range: a
+// scope limit this tool chooses rather than one either output format
+// imposes (audit 2026-09-30, R06's int64-overflow case). RoundTrip alone
+// wouldn't catch it, since JSON has no defined integer range and this
+// package's YAML handler classifies by the lexer's own token type, not a
+// numeric range check.
+func validTypeLiteral(handler format.Handler, value string, t tag.Type) error {
 	switch t {
-	case tag.TypeBool:
-		_, err = strconv.ParseBool(value)
-	case tag.TypeInt:
-		_, err = strconv.ParseInt(value, 10, 64)
-	case tag.TypeFloat:
-		_, err = strconv.ParseFloat(value, 64)
+	case tag.TypeInt, tag.TypeFloat, tag.TypeBool:
+	default:
+		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("%w: %q is not a valid %s", ErrInvalidTypeLiteral, value, t)
+	if t == tag.TypeInt {
+		if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+			return fmt.Errorf("%w: %q is not a valid %s: %v", ErrInvalidTypeLiteral, value, t, err)
+		}
+	}
+	if err := handler.RoundTrip(value, t); err != nil {
+		return fmt.Errorf("%w: %q is not a valid %s: %v", ErrInvalidTypeLiteral, value, t, err)
 	}
 	return nil
 }

@@ -106,3 +106,14 @@ up front or to pick up that lazy convergence afterward.
   leaves the committed config untouched. Minting a new version while
   silently leaving part of the repo unreadable under it is exactly the
   outcome AC-11.4 exists to prevent.
+- **AC-11.12 A failure partway through reverts itself**: `rotate` captures
+  `.nebel.yaml`'s exact content before changing anything. If it then fails
+  while writing the new config, staging it, or re-encrypting content under
+  it (AC-11.2/AC-11.6), it automatically restores that captured content —
+  to the working tree, and to the index if it had already been staged —
+  before reporting the error, so no managed file and no leftover
+  half-rotated config is left behind. It restores to what `.nebel.yaml`
+  held when this `rotate` invocation started, not necessarily `HEAD`:
+  AC-11.9 allows running `rotate` again before a previous rotation is
+  committed, and in that case `HEAD` is one rotation further back than
+  what a failed retry should revert to (audit 2026-09-30, reanalysis 4.1).

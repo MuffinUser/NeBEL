@@ -255,6 +255,13 @@ leaked, change the underlying secrets too, not just the password.
   `ENC[...]` in the working tree): rotating anyway would silently strand
   that field on its existing version forever. The error names the stuck
   path, field, and version, and points at `nebel init --version N`.
+- If something fails partway through (disk full while saving the new
+  config, `git add` itself failing, or a re-encryption failure), `rotate`
+  automatically restores `.nebel.yaml` to exactly what it held before this
+  attempt — working tree and, if it was already staged, the index too —
+  before reporting the error. No managed file is ever at risk: re-encryption
+  only stages one once it has succeeded for every managed path in the same
+  step, so a failure there leaves all of them untouched.
 - Other clones/CI keep reading old content fine with their *current* key
   right up until they pull the rotation commit — after that, since
   rotation just re-encrypted everything on this branch, they need the new

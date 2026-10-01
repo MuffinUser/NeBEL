@@ -39,10 +39,49 @@ The only thing written by a Human is this Foreword. So take it for what it is.
 ## Install
 
 One static binary, which **must be on your `PATH`** — git invokes it by name
-(`nebel clean %f`). Get the archive onto the machine however you like
-(from [Releases](https://github.com/MuffinUser/nebel/releases), a
-share, a USB stick); the steps below install from that local file and need
-no internet. Adjust the filename to your version.
+(`nebel clean %f`).
+
+### From the internet
+
+Downloads the latest release, verifies its checksum, and puts `nebel` on
+your `PATH`.
+
+**macOS / Linux:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MuffinUser/NeBEL/main/scripts/install.sh | sh
+# or: wget -qO- https://raw.githubusercontent.com/MuffinUser/NeBEL/main/scripts/install.sh | sh
+```
+
+**Windows** (PowerShell), then open a new terminal:
+
+```powershell
+irm https://raw.githubusercontent.com/MuffinUser/NeBEL/main/scripts/install.ps1 | iex
+```
+
+From `cmd.exe`:
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol='Tls12'; irm https://raw.githubusercontent.com/MuffinUser/NeBEL/main/scripts/install.ps1 | iex"
+```
+
+Both scripts install the latest release by default. To pin a version, set
+`NEBEL_VERSION` first:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MuffinUser/NeBEL/main/scripts/install.sh | NEBEL_VERSION=v0.5.2 sh
+```
+
+```powershell
+$env:NEBEL_VERSION = 'v0.5.2'; irm https://raw.githubusercontent.com/MuffinUser/NeBEL/main/scripts/install.ps1 | iex
+```
+
+### From a local file (no internet)
+
+Get the archive onto the machine however you like (from
+[Releases](https://github.com/MuffinUser/nebel/releases), a share, a USB
+stick); the steps below install from that local file and need no internet.
+Adjust the filename to your version.
 
 **Windows** (PowerShell), then open a new terminal:
 

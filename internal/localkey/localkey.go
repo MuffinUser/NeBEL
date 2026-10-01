@@ -36,13 +36,34 @@ import (
 )
 
 // setMu serializes Set's read-modify-write of the key file against other
-// goroutines in this process. It does not extend across processes — a
-// separate `nebel` invocation racing this one (a concurrent filter
-// process, say) is not covered, since doing so portably (this project
-// supports Windows, so a unix-only syscall.Flock is off the table) would
-// need a cross-process lock file of its own, with its own stale-lock and
-// cleanup questions. Narrowing the race to cross-process only is a
-// deliberate, accepted trade-off, not a silent one.
+// goroutines in this process. The cross-process lockFile below would
+// still correctly serialize two goroutines in this same process too on
+// Unix (verified empirically there: a second, independent open-and-flock
+// from the same process blocks until the first is released, rather than
+// acquiring a separate, non-conflicting lock) — Windows' LockFileEx is
+// only compile-checked, not verified the same way, but documented as
+// having the same per-open-handle semantics. Either way, setMu isn't
+// needed for correctness, only kept as a cheap in-process fast path in
+// front of it, avoiding a file open and a syscall for the common case of
+// no cross-process contention at all.
+//
+// The lockFile call inside Set covers a concurrent `nebel` process (a
+// racing filter invocation, or another command reading the keyring mid-Set)
+// losing or clobbering an update to the key file itself — the lost-update
+// race reproduced and fixed in audit 2026-09-30, reanalysis 4.3. It does
+// not, by itself, serialize two concurrent full `nebel rotate` operations:
+// each could still read the same current version from .nebel.yaml and
+// independently decide to mint the same next version with a different
+// key before either calls Set — Set's lock then just decides, silently,
+// which of the two keys ends up registered for that version. Preventing
+// that is cmd/nebel/rotate.go's job (see localkey.LockRotation), not
+// this package's: a bare Get/Set caller has no "operation" to serialize
+// around, only the one write this function already protects.
+//
+// Advisory, not mandatory, locking is the right trade-off here: every
+// locker is this same package (plus, for LockRotation, cmd/nebel
+// directly), so there is no untrusted writer to defend against, only
+// ordinary concurrent legitimate use.
 var setMu sync.Mutex
 
 // configKeyPrefix is the local git config variable a version's key was
@@ -113,6 +134,62 @@ func keyFilePath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, keyFileName), nil
+}
+
+// lockFilePath returns the path of the sibling file Set locks to serialize
+// its read-modify-write across processes. A dedicated file, not the key
+// file itself: writeKeyFile replaces the key file by renaming a temp file
+// onto it (for atomicity against a concurrent reader), so a lock held on
+// the key file's own inode would stop protecting anything the moment the
+// first writer's rename swaps a new inode in underneath it — the next
+// locker would lock the old, now-orphaned inode no one else can still see.
+func lockFilePath() (string, error) {
+	path, err := keyFilePath()
+	if err != nil {
+		return "", err
+	}
+	return path + ".lock", nil
+}
+
+// LockRotation acquires an exclusive, cross-process lock over a full
+// `nebel rotate` operation (cmd/nebel/rotate.go), from before it reads
+// the current key version through the point it finishes re-encrypting
+// everything under the new one. The returned func releases it; call it
+// exactly once, however rotate finishes.
+//
+// This is a different file from Set's own lockFilePath, deliberately:
+// rotate calls Set once as part of the operation this lock already spans,
+// and flock/LockFileEx locks conflict against another lock this same
+// process already holds via a different open file description (verified
+// empirically — see setMu's doc comment) — locking the same file twice
+// in one process would block that second call forever, on itself.
+//
+// Without this, two concurrent `rotate` runs in the same clone could both
+// read the same current version from .nebel.yaml and each independently
+// decide to mint the same next version with a different key: Set's own
+// lock (audit 2026-09-30, reanalysis 4.3) only stops that pair of calls
+// from corrupting the key file, not from both proceeding at all — whichever
+// one's Save runs last would silently decide the project's actual key for
+// a version the other process's keyring now also, wrongly, claims to
+// have the key for. This lock serializes the two attempts instead, so the
+// second one sees the first's result and mints version N+2, not another
+// N+1.
+//
+// Scoped to one shared git directory — the same scope Set's own keyring
+// is shared across (gitCommonDir) — so it serializes every worktree of
+// one clone, but not `rotate` running concurrently in two independent
+// clones (which have no shared state to protect in the first place; each
+// produces its own, independently valid, next version).
+func LockRotation() (func() error, error) {
+	dir, err := gitCommonDir()
+	if err != nil {
+		return nil, err
+	}
+	lock, err := lockFile(filepath.Join(dir, keyFileName+".rotate.lock"))
+	if err != nil {
+		return nil, fmt.Errorf("localkey: acquiring rotation lock: %w", err)
+	}
+	return lock.Unlock, nil
 }
 
 // readKeyFile parses the key file into version -> base64-encoded key. A
@@ -271,14 +348,56 @@ func Get(version int) (key []byte, ok bool, err error) {
 // the legacy git-config location (see readLegacyEntries), which this
 // never migrates or removes.
 func Set(version int, key []byte) error {
+	return withKeyFileLock(func(entries map[int]string) (map[int]string, error) {
+		entries[version] = base64.StdEncoding.EncodeToString(key)
+		return entries, nil
+	})
+}
+
+// Remove deletes version's entry from the key file, if present; removing
+// an absent version is not an error. Unlike Set, this is not meant for
+// ordinary use — Set's own "existing versions are left untouched"
+// guarantee (AC-11.5) exists specifically so a clone never loses the
+// ability to read something it could read before. Remove exists only for
+// a caller undoing a Set it just made itself but no longer wants: a
+// failed `nebel rotate` reverting the key version it minted, so that
+// version doesn't linger registered under this attempt's key and later
+// collide with whatever key a teammate's own successful rotation to the
+// same version number eventually registers for it (audit 2026-09-30,
+// reanalysis 4.3).
+func Remove(version int) error {
+	return withKeyFileLock(func(entries map[int]string) (map[int]string, error) {
+		delete(entries, version)
+		return entries, nil
+	})
+}
+
+// withKeyFileLock runs edit under both setMu and the cross-process
+// lockFile (see their doc comments), over the same read-modify-write span
+// both Set and Remove need: read the current entries, let edit produce
+// the next version of the map, write it back.
+func withKeyFileLock(edit func(entries map[int]string) (map[int]string, error)) error {
 	setMu.Lock()
 	defer setMu.Unlock()
+
+	lockPath, err := lockFilePath()
+	if err != nil {
+		return err
+	}
+	lock, err := lockFile(lockPath)
+	if err != nil {
+		return fmt.Errorf("localkey: locking %s: %w", lockPath, err)
+	}
+	defer lock.Unlock()
 
 	entries, err := readKeyFile()
 	if err != nil {
 		return err
 	}
-	entries[version] = base64.StdEncoding.EncodeToString(key)
+	entries, err = edit(entries)
+	if err != nil {
+		return err
+	}
 	return writeKeyFile(entries)
 }
 

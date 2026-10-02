@@ -51,9 +51,11 @@ USER_INTERACTIONS.md § init / add.
     contain no control characters. For env it must also contain no
     whitespace and no `=`. So `a..b`, `.x` and `foo[` are valid
     properties keys and must load.
-  - Undetectable (e.g. `config/*`, `**/*`): only the non-empty /
-    no-control-character check runs at load. The format-specific check
-    is deferred to `Locate` at clean/add time, per matched file.
+  - Undetectable (e.g. `config/*`, `**/*`): `ParsePath`, as today. That
+    keeps a typo like `api.keys[` failing at load for existing YAML/JSON
+    repos. The trade-off: a line-format key that isn't valid dot notation
+    needs a glob whose format can be detected (`*.properties`, `.env.*`).
+    The load error says so.
 
   This removes a conflict with REQUIREMENTS.md § Value selection: today
   every entry goes through `ParsePath`, which rejects legal literal keys.

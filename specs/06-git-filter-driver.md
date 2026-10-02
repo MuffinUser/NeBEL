@@ -96,6 +96,7 @@ See REQUIREMENTS.md § Git integration, § Bootstrapping & no-key operation.
   test pins one `.env` and one `.properties` ciphertext, so a change to
   span boundaries (which would re-encrypt every committed value) can't
   land silently.
-- **AC-6.15 Smudge newline guard**: smudge of a line-based format rejects
-  a decrypted value containing `\n` or `\r` with an error (spec 05
-  AC-5.23), the same as a tampered tag under AC-6.9.
+- **AC-6.15 Smudge context guard**: smudge of a line-based format rejects
+  a decrypted value that isn't valid in its current quote context, or that
+  contains `\n`/`\r` (spec 05 AC-5.23), with an error naming file and
+  key, handled the same way as a tampered tag under AC-6.9.

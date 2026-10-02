@@ -119,6 +119,10 @@ properties library reports byte offsets, and AC-5.1 needs offsets.
   in place. This is the line-format equivalent of the YAML CRLF fix in
   70d7d5f; a Windows checkout with `core.autocrlf=true` must round-trip.
   A file mixing `\n` and `\r\n` is handled line by line.
+  A lone `\r` (not followed by `\n`) differs by format. In
+  `.properties` it is a line terminator, as in `java.util.Properties`, so
+  `a=1\rpassword=x` is two entries. In `.env` it is `ErrMalformed`. So a
+  located raw literal can never contain `\r` or `\n`.
 - **AC-5.16 BOM**: a leading UTF-8 BOM is not part of the first key, and
   it is preserved byte-for-byte.
 - **AC-5.17 Duplicate configured key rejected**: if a configured key
@@ -152,12 +156,24 @@ properties library reports byte offsets, and AC-5.1 needs offsets.
   source order, with `Path` = literal key, `Value` = raw literal,
   `Type` = `str`. Entries with a duplicated key (AC-5.17) or a multi-line
   value (AC-5.18) are omitted, because selecting them could only fail.
-- **AC-5.23 Smudge refuses line breaks**: in a line-based format, a
-  decrypted plaintext containing `\n` or `\r` is rejected as an error,
-  not spliced in. Clean can never produce one (AC-5.18), so it can only
-  come from a hand-crafted tag, and writing it out would inject new
-  key/value lines into the file. Enforced in `filterop` (spec 06), tested
-  here via the handler contract.
+- **AC-5.23 Smudge checks the literal against its current context**:
+  quotes are outside the span and outside the AAD, so they can change
+  after clean (hand edit, linter auto-fix) without failing
+  authentication. Before splicing, smudge checks that the decrypted raw
+  literal is valid where the tag *now* sits, and errors otherwise rather
+  than writing a silently different value:
+  - any line format: no `\n` or `\r` (clean can never produce one,
+    AC-5.15/5.18; one could only come from a crafted tag and would inject
+    new lines);
+  - `.env` double-quoted: no unescaped `"`;
+  - `.env` single-quoted: no `'`;
+  - `.env` unquoted: doesn't start with a quote character, has no
+    whitespace followed by `#`, and has no leading or trailing whitespace;
+  - `.properties`: no leading whitespace, and doesn't end in an odd
+    number of backslashes.
+
+  The handler exposes the check (e.g. `CheckLiteral(src, span, literal)`),
+  and `filterop` (spec 06) calls it.
 
 ## `.env`
 

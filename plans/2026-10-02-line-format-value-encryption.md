@@ -47,11 +47,11 @@ Specs: 05 § Line-based formats (AC-5.9–5.30), 04 AC-4.11, 06 AC-6.14–6.15,
    - `Validate` chooses its key check from `Detect(path.Base(r.Files))`
      (AC-4.11).
    - Tests: `a..b` loads for `*.properties`, `A B` is rejected for
-     `*.env`, a dot-path still parses for `*.yaml`, an unknown glob gets
-     only the minimal check.
+     `*.env`, a dot-path still parses for `*.yaml`, an unknown glob still
+     uses `ParsePath`.
 3. **Shared line tokenizer** — `internal/format/lines.go`
    - Splits into logical lines with real byte offsets, `\r` excluded,
-     BOM skipped (AC-5.15, 5.16). Shared duplicate-key and multi-line
+     BOM skipped, lone `\r` per format (AC-5.15, 5.16). Shared duplicate-key and multi-line
      bookkeeping (AC-5.17, 5.18). Errors `ErrDuplicateKey`,
      `ErrMultiline`, `ErrMalformed` with line numbers.
 4. **`.env` handler** — `internal/format/env.go`
@@ -65,7 +65,7 @@ Specs: 05 § Line-based formats (AC-5.9–5.30), 04 AC-4.11, 06 AC-6.14–6.15,
      detection, logical-key unescaping incl. `\uXXXX`, trailing whitespace
      kept in values (AC-5.11–5.13, 5.28–5.30).
 6. **Filter integration** — `internal/filterop/filterop.go`
-   - Smudge newline guard for line formats (AC-6.15). Everything else
+   - Smudge context guard for line formats (AC-5.23, AC-6.15). Everything else
      should already work through the `Handler` interface. Update the
      `Span.Value` doc comment.
    - Tests: clean→smudge round trip (AC-6.5), idempotence (AC-6.3),
@@ -89,4 +89,7 @@ Specs: 05 § Line-based formats (AC-5.9–5.30), 04 AC-4.11, 06 AC-6.14–6.15,
   The grammar targets the common subset. Anything outside it fails
   closed (`ErrMalformed`) rather than being guessed at.
 - **Tampering via line injection** is covered by SIV authentication plus
-  the smudge newline guard (AC-6.15).
+  the smudge context guard (AC-6.15).
+- **Quote edits after clean** (e.g. dotenv-linter) aren't authenticated.
+  The context guard turns them into a visible smudge error instead of a
+  silently different value.

@@ -87,3 +87,15 @@ See REQUIREMENTS.md § Git integration, § Bootstrapping & no-key operation.
   tag-declared version, not the config's current version — a file whose
   fields span several versions decrypts correctly as long as the keyring
   holds all of them.
+- **AC-6.14 Line formats through the filter**: for a `mode: value` rule
+  matching a `.env` or `.properties` file (spec 05 AC-5.14), AC-6.2
+  through AC-6.13 hold unchanged. The AAD field component is the
+  configured literal key, e.g. `siv.AAD(ModeValue, "prod.env",
+  "DATABASE_PASSWORD")`. The plaintext encrypted is the raw literal
+  (spec 05 § Line-based formats), and the tag's type is `str`. A golden
+  test pins one `.env` and one `.properties` ciphertext, so a change to
+  span boundaries (which would re-encrypt every committed value) can't
+  land silently.
+- **AC-6.15 Smudge newline guard**: smudge of a line-based format rejects
+  a decrypted value containing `\n` or `\r` with an error (spec 05
+  AC-5.23), the same as a tampered tag under AC-6.9.

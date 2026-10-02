@@ -41,3 +41,19 @@ USER_INTERACTIONS.md § init / add.
   existed in the history is a clear error, not an empty/zero result.
 - **AC-4.10 Bootstrap starts at version 1**: a freshly bootstrapped config
   (spec 07) always sets `key_version: 1`.
+- **AC-4.11 Format-aware field validation**: `Validate` checks each
+  `encrypt` entry against the format of its rule's `files` glob, detected
+  by applying spec 05 AC-5.14 to the glob's last path segment (`*.env` →
+  env, `config/*.properties` → properties, `**/*.yaml` → YAML,
+  `.env.*` → env).
+  - YAML/JSON: the entry must parse with `format.ParsePath` (as today).
+  - env/properties: the entry is a literal key. It must be non-empty and
+    contain no control characters. For env it must also contain no
+    whitespace and no `=`. So `a..b`, `.x` and `foo[` are valid
+    properties keys and must load.
+  - Undetectable (e.g. `config/*`, `**/*`): only the non-empty /
+    no-control-character check runs at load. The format-specific check
+    is deferred to `Locate` at clean/add time, per matched file.
+
+  This removes a conflict with REQUIREMENTS.md § Value selection: today
+  every entry goes through `ParsePath`, which rejects legal literal keys.

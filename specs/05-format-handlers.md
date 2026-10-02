@@ -76,20 +76,149 @@ space, and would produce git diffs on lines nobody edited.
   tokenizer, which reports byte offsets; no third-party dependency and no
   re-marshalling.
 
+
+## Line-based formats (`.env`, `.properties`) — shared
+
+`.env` and `.properties` have no nesting and no native scalar types, so
+two rules from the structured formats change for them:
+
+- **Addressing**: a configured path is the **literal key**, matched
+  exactly. A dot or bracket in it is just a character
+  (REQUIREMENTS.md § Value selection). `format.ParsePath` is never called
+  for these formats.
+- **What gets encrypted is the raw literal**: the value text exactly as
+  written between its delimiters, with no unquoting and no unescaping.
+  Quotes, if any, stay in the file *outside* the span. Smudge writes the
+  literal back unchanged. This makes AC-6.5's exact reversal hold by
+  construction and means there's never a re-render that could change
+  meaning (e.g. single to double quotes turning on `$` interpolation in
+  docker-compose). The trade-off is accepted: switching a value's quote
+  style doesn't change its ciphertext, and the quote change shows up in
+  git as an ordinary edit outside the tag. `Span.Value` holds the raw
+  literal for these formats.
+- **Type**: always `type:str`. Neither format has native types, so
+  REQUIREMENTS.md § type preservation / spec 03 AC-3.2 has nothing to
+  preserve here.
+
+Both formats are parsed by small handwritten line tokenizers in
+`internal/format`, with no new dependency. No maintained Go dotenv or
+properties library reports byte offsets, and AC-5.1 needs offsets.
+
+- **AC-5.14 Format detection by name**: `format.For` picks a handler
+  from the file's *base name*, in this order:
+  1. extension `.yaml`/`.yml` → YAML, `.json` → JSON, `.properties` →
+     properties, `.env` → env;
+  2. otherwise a base name equal to `.env` or starting with `.env.` →
+     env (`.env`, `.env.local`, `.env.production`).
+
+  A known extension wins over the `.env.` prefix, so `.env.json` is JSON.
+  Anything else is `ErrUnsupportedFormat`. A table test lists matching and
+  non-matching names.
+- **AC-5.15 CRLF**: on a file with `\r\n` line endings, located spans and
+  `Span.Value` never include the `\r`, and AC-5.1 holds with the CRs left
+  in place. This is the line-format equivalent of the YAML CRLF fix in
+  70d7d5f; a Windows checkout with `core.autocrlf=true` must round-trip.
+  A file mixing `\n` and `\r\n` is handled line by line.
+- **AC-5.16 BOM**: a leading UTF-8 BOM is not part of the first key, and
+  it is preserved byte-for-byte.
+- **AC-5.17 Duplicate configured key rejected**: if a configured key
+  occurs more than once in the file, `Locate` fails with
+  `ErrDuplicateKey`, naming the key and every line number it appears on.
+  Both formats use the *last* occurrence at runtime, so encrypting any one
+  occurrence could leave the effective value in plaintext. Duplicates of
+  keys *not* configured are ignored.
+- **AC-5.18 Multi-line values: tokenized, never located**: the tokenizer
+  recognizes multi-line constructs (`.properties` continuation lines, a
+  `.env` quoted value whose closing quote is on a later line). That way it
+  never misreads a continuation line such as `  password=x` as a key of
+  its own. `Locate` on a configured key whose value spans more than one
+  line fails with `ErrMultiline`; the error suggests `mode: file` for
+  values like PEM keys. This resolves AC-5.13. Support can be added later
+  without a format break, because no such tag can exist yet.
+- **AC-5.19 Malformed line rejected**: a line that is neither blank, a
+  comment, nor a key/value entry fails `Locate` and `Leaves` with
+  `ErrMalformed`, naming the line number. The handler fails closed rather
+  than skipping text it doesn't understand, since that text might hide a
+  key.
+- **AC-5.20 Empty value**: `KEY=` (or `KEY=""`) locates a zero-length span
+  at the value position and is encrypted like any other value. Leaving it
+  unencrypted would reveal that the secret is blank.
+- **AC-5.21 Render is verbatim**: `Render(value, t)` returns `value`
+  unchanged for both formats, both for an `ENC[...]` tag on clean and
+  for the raw literal on smudge. Quotes live outside the span, so there is
+  nothing to add. An `ENC[...]` tag is safe as an unquoted value in both
+  formats: it contains no whitespace, `#`, `!`, `$`, quote or backslash.
+- **AC-5.22 Picker leaves**: `Leaves` returns every key/value entry in
+  source order, with `Path` = literal key, `Value` = raw literal,
+  `Type` = `str`. Entries with a duplicated key (AC-5.17) or a multi-line
+  value (AC-5.18) are omitted, because selecting them could only fail.
+- **AC-5.23 Smudge refuses line breaks**: in a line-based format, a
+  decrypted plaintext containing `\n` or `\r` is rejected as an error,
+  not spliced in. Clean can never produce one (AC-5.18), so it can only
+  come from a hand-crafted tag, and writing it out would inject new
+  key/value lines into the file. Enforced in `filterop` (spec 06), tested
+  here via the handler contract.
+
 ## `.env`
+
+Grammar, per line (leading and trailing whitespace around tokens is
+preserved outside spans):
+
+```
+blank     := WS*
+comment   := WS* "#" ANY*
+entry     := WS* ["export" WS+] KEY WS* "=" WS* VALUE WS* [ "#" ANY* ]
+KEY       := one or more chars, none of them whitespace or "="
+VALUE     := unquoted | "'" ANY* "'" | '"' ( "\" ANY | not-'"' )* '"'
+unquoted  := runs to end of line, stopping before WS+ "#"; trailing WS excluded
+```
 
 - **AC-5.9**: an exact key match (`DATABASE_PASSWORD`) replaces only that
   line's value; other lines are untouched byte-for-byte.
-- **AC-5.10**: existing quoting conventions (`KEY="value"` vs `KEY=value`)
-  are preserved or documented as normalized — pick one behavior and test
-  it explicitly.
+- **AC-5.10 Quoting preserved**: the quote style is preserved, never
+  normalized. For `KEY=value`, `KEY='value'` and `KEY="value"` the span
+  covers `value` only, so clean produces `KEY=ENC[...]`,
+  `KEY='ENC[...]'` and `KEY="ENC[...]"` respectively. Inside double
+  quotes, `\"` doesn't close the value and stays in the raw literal as is.
+- **AC-5.24 `export` prefix**: `export KEY=value` is located by `KEY`,
+  and `export ` is preserved outside the span.
+- **AC-5.25 Inline comments**: for an unquoted value, whitespace followed
+  by `#` starts a comment that is excluded from the span and preserved.
+  A `#` not preceded by whitespace (`KEY=abc#def`) is part of the value.
+  After a closing quote, only whitespace and an optional `# comment` may
+  follow; anything else is `ErrMalformed`.
+- **AC-5.26 Spaces around `=`**: `KEY = value` locates `value`, and the
+  surrounding whitespace is preserved outside the span.
+- **AC-5.27 Unterminated quote**: a quote that is never closed by end of
+  file is `ErrMalformed`. One closed on a later line is the multi-line
+  case (AC-5.18).
 
 ## `.properties`
 
+Follows `java.util.Properties.load` line syntax, treated as bytes. The
+raw-literal rule means ISO-8859-1 vs UTF-8 never matters, since nothing is
+ever decoded.
+
 - **AC-5.11**: an exact key match replaces only that entry's value; other
-  entries untouched byte-for-byte.
-- **AC-5.12**: both `=` and `:` key/value separators (valid in Java
-  `.properties`) are supported.
-- **AC-5.13**: line-continuation syntax (trailing `\`) is either supported
-  correctly or explicitly rejected with a clear error — decide and test
-  one behavior, don't leave it undefined.
+  entries are untouched byte-for-byte.
+- **AC-5.12 Separators**: `key=value`, `key:value` and `key value`
+  (whitespace separator) are all supported, with optional whitespace
+  around `=`/`:`. The value span starts after the separator and any
+  whitespace following it, and runs to end of line (excluding the line
+  terminator). Trailing whitespace is *included*, because Java keeps it as
+  part of the value.
+- **AC-5.13 Line continuation**: a line ending in an odd number of
+  backslashes continues onto the next line. The tokenizer joins such lines
+  to find entry boundaries, and `Locate` on a key whose value continues
+  is `ErrMultiline` (AC-5.18). Decided: rejected, not supported, in v1.
+- **AC-5.28 Comments**: lines whose first non-whitespace character is `#`
+  or `!` are comments.
+- **AC-5.29 Key matching on the logical key**: a configured key is
+  compared with the key as Java would read it, with `\ `, `\:`, `\=`,
+  `\\`, `\t`/`\n`/… and `\uXXXX` escapes resolved. So `my\ key` is matched
+  by the configured key `my key`. Duplicate detection (AC-5.17) uses the
+  same logical key, so `ab` and `ab` count as the same key. Only the
+  *value* is raw-literal; the key itself is never rewritten.
+- **AC-5.30 Escapes in values stay raw**: `\uXXXX` and other escapes in a
+  value are part of the encrypted raw literal and come back unchanged on
+  smudge.

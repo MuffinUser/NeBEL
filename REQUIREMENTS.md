@@ -181,6 +181,11 @@ with transparent local decryption for developers.
   - **.properties / .env**: no real nesting — the "path" is an **exact
     literal match** on the full key/variable name (a dot in a `.properties`
     key is just a character, not a path separator).
+    The raw value literal is what gets encrypted (no unquoting or
+    unescaping, quotes stay in the file), always as `type:str`, since
+    neither format has native types. Duplicate configured keys and
+    multi-line values are refused in v1. Details: spec 05 § Line-based
+    formats.
 
 Example config shape:
 

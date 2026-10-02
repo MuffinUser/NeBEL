@@ -1,0 +1,92 @@
+# Plan — field-level encryption for `.env` and `.properties`
+
+Branch: `feature/line-format-value-encryption`
+Specs: 05 § Line-based formats (AC-5.9–5.30), 04 AC-4.11, 06 AC-6.14–6.15,
+08 AC-8.11.
+
+## Decisions (agreed 2026-10-02)
+
+| Topic | Decision |
+|---|---|
+| `.env` file names | `*.env`, `.env`, `.env.*`. Detected by base name; a known extension wins (`.env.json` is JSON) |
+| Duplicate configured key | Hard error naming the key and lines (`ErrDuplicateKey`) |
+| Multi-line values | Tokenized so they're skipped correctly, but locating one is `ErrMultiline` (v1) |
+| What gets encrypted | Raw literal: quotes stay in the file, no unescaping; `type:str` |
+| `.env` syntax | `export ` prefix supported; ` #` after an unquoted value starts a comment |
+| `.properties` keys | Matched on the logical (unescaped) key; values stay raw |
+| Dependencies | None new. Handwritten line tokenizers |
+
+## Conflicts with current requirements / code
+
+1. **Config validation** (`internal/config/config.go` `Validate`) runs
+   `format.ParsePath` on every `encrypt` entry. That rejects legal literal
+   keys such as `a..b` or `foo[`, which contradicts REQUIREMENTS § Value
+   selection. → AC-4.11.
+2. **Format detection** (`format.For`) uses `filepath.Ext`. `.env.local`
+   resolves to `.local` and is rejected. → AC-5.14.
+3. **Type preservation** (REQUIREMENTS, AC-3.2) doesn't apply: these
+   formats have no types, so it's always `str`. Clarified in REQUIREMENTS.
+4. **`Span.Value` doc** says "quotes removed, escapes resolved". For line
+   formats it is the raw literal, so the doc comment needs updating.
+5. **Open spec decisions** AC-5.10 (quoting) and AC-5.13 (continuation)
+   are now decided.
+6. **Docs**: USER_INTERACTIONS said "not implemented yet" (updated).
+7. **Known limitation, not addressed here**: `*.env` in `.nebel.yaml`
+   matches only at the repository root (doublestar), while `.gitattributes`
+   matches at any depth (audit 2026-09-29 §153). Users should write
+   `**/*.env`. Out of scope, but worth a README note.
+
+## Steps (each step leaves `go test ./...` green; one commit per step)
+
+1. **Format detection** — `internal/format/format.go`
+   - Add `Detect(name string) (Kind, bool)` working on a base name
+     (AC-5.14). `For` uses it; config can reuse it on a glob's last segment.
+   - Tests: name table (`.env`, `.env.local`, `prod.env`, `.env.json`,
+     `app.properties`, `env`, `x.envrc`).
+2. **Config validation** — `internal/config/config.go`
+   - `Validate` chooses its key check from `Detect(path.Base(r.Files))`
+     (AC-4.11).
+   - Tests: `a..b` loads for `*.properties`, `A B` is rejected for
+     `*.env`, a dot-path still parses for `*.yaml`, an unknown glob gets
+     only the minimal check.
+3. **Shared line tokenizer** — `internal/format/lines.go`
+   - Splits into logical lines with real byte offsets, `\r` excluded,
+     BOM skipped (AC-5.15, 5.16). Shared duplicate-key and multi-line
+     bookkeeping (AC-5.17, 5.18). Errors `ErrDuplicateKey`,
+     `ErrMultiline`, `ErrMalformed` with line numbers.
+4. **`.env` handler** — `internal/format/env.go`
+   - Grammar per spec 05 § `.env`: export, quotes, `\"`, inline comments,
+     spaces around `=`, empty values, unterminated quotes (AC-5.9, 5.10,
+     5.19–5.22, 5.24–5.27).
+   - Tests: AC-5.1 byte-exactness over a fixture with every construct,
+     plus LF and CRLF variants.
+5. **`.properties` handler** — `internal/format/properties.go`
+   - `=`/`:`/whitespace separators, `#`/`!` comments, continuation
+     detection, logical-key unescaping incl. `\uXXXX`, trailing whitespace
+     kept in values (AC-5.11–5.13, 5.28–5.30).
+6. **Filter integration** — `internal/filterop/filterop.go`
+   - Smudge newline guard for line formats (AC-6.15). Everything else
+     should already work through the `Handler` interface. Update the
+     `Span.Value` doc comment.
+   - Tests: clean→smudge round trip (AC-6.5), idempotence (AC-6.3),
+     per-field key versions (AC-6.13), and a new golden ciphertext for one
+     `.env` and one `.properties` value in `golden_test.go` (AC-6.14).
+7. **CLI** — `cmd/nebel`
+   - `add field` e2e for both formats, incl. the picker and refusal of
+     duplicate/multi-line keys (AC-8.11). `undecrypted.go` and rotate get
+     the formats for free via `format.For`; add one rotate e2e on a `.env`
+     to prove it.
+8. **Docs** — README format table and examples, plus the `**/*.env` glob
+   note.
+
+## Risks
+
+- **Span boundaries are permanent once shipped.** Committed ciphertext
+  depends on exactly which bytes are the "raw literal". The golden tests
+  in step 6 pin this; any later change to the boundaries is a breaking
+  format change.
+- **Dotenv dialects differ** (compose, godotenv, python-dotenv, Node).
+  The grammar targets the common subset. Anything outside it fails
+  closed (`ErrMalformed`) rather than being guessed at.
+- **Tampering via line injection** is covered by SIV authentication plus
+  the smudge newline guard (AC-6.15).

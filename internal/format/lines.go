@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	"github.com/MuffinUser/nebel/internal/tag"
 )
 
 // valueContext is the syntax a line-based value sits in. It decides which
@@ -158,6 +160,15 @@ func oddTrailingBackslashes(b []byte) bool {
 		n++
 	}
 	return n%2 == 1
+}
+
+// lineTypeRoundTrip is RoundTrip for the line-based formats, whose values
+// are always strings (spec 03, type preservation doesn't apply).
+func lineTypeRoundTrip(t tag.Type) error {
+	if t != tag.TypeStr {
+		return fmt.Errorf("line-based formats only hold strings, not %s", t)
+	}
+	return nil
 }
 
 func checkNoLineBreak(value string) error {

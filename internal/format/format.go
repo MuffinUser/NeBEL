@@ -206,6 +206,8 @@ func For(filePath string) (Handler, error) {
 		return yamlHandler{}, nil
 	case KindJSON:
 		return jsonHandler{}, nil
+	case KindEnv:
+		return envHandler{}, nil
 	}
 	return nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, filePath)
 }

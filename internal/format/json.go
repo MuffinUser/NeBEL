@@ -264,3 +264,6 @@ func (jsonHandler) Leaves(src []byte) ([]Leaf, error) {
 	}
 	return leaves, nil
 }
+
+// CheckLiteral always accepts: Render quotes and escapes any value.
+func (jsonHandler) CheckLiteral(Span, string) error { return nil }

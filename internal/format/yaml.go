@@ -490,3 +490,6 @@ func (yamlHandler) Leaves(src []byte) ([]Leaf, error) {
 	walk(file.Docs[0].Body, "")
 	return leaves, nil
 }
+
+// CheckLiteral always accepts: Render quotes and escapes any value.
+func (yamlHandler) CheckLiteral(Span, string) error { return nil }

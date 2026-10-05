@@ -40,6 +40,25 @@ var (
 	// values while reporting success — the same silent-failure concern
 	// ErrNotFound already guards for a path that resolves to nothing.
 	ErrAmbiguousPath = errors.New("format: path is ambiguous")
+
+	// ErrDuplicateKey is returned when a configured key occurs more than
+	// once in a .env or .properties file. Both formats let the last
+	// occurrence win at runtime, so encrypting any single one could leave
+	// the effective value in plaintext (spec 05 AC-5.17).
+	ErrDuplicateKey = errors.New("format: key occurs more than once")
+
+	// ErrMultiline is returned when a configured key's value spans more
+	// than one line, which line-based formats don't encrypt (AC-5.18).
+	ErrMultiline = errors.New("format: value spans several lines; use mode: file for it")
+
+	// ErrMalformed is returned for a line a line-based handler can't
+	// parse. Skipping it instead could hide a key (AC-5.19).
+	ErrMalformed = errors.New("format: malformed line")
+
+	// ErrLiteralContext is returned when a decrypted value can't be
+	// written back where its tag now sits, e.g. because the quotes around
+	// the tag changed after it was encrypted (AC-5.23).
+	ErrLiteralContext = errors.New("format: decrypted value does not fit its surrounding quotes")
 )
 
 // checkUnambiguous reports ErrAmbiguousPath if path selects more than one
@@ -69,14 +88,21 @@ type Span struct {
 	// splicing a replacement over [Start:End) leaves the rest untouched.
 	Start, End int
 
-	// Value is the scalar's decoded content: quotes removed, escapes
-	// resolved. This is what gets encrypted, so that the same secret
-	// encrypts identically however it happened to be quoted.
+	// Value is what gets encrypted. For YAML and JSON it is the scalar's
+	// decoded content (quotes removed, escapes resolved), so the same
+	// secret encrypts identically however it happened to be quoted. For
+	// .env and .properties it is the raw literal between the value's
+	// delimiters, escapes untouched; the quotes stay in the file outside
+	// the span (spec 05 § Line-based formats).
 	Value string
 
 	// Type is the scalar's native type, recorded in the tag so decryption
 	// can restore it.
 	Type tag.Type
+
+	// ctx is the quoting a line-based value sits in, for CheckLiteral.
+	// Zero for YAML and JSON, whose Render escapes whatever it is given.
+	ctx valueContext
 }
 
 // Handler locates and renders scalars for one file format.
@@ -114,6 +140,13 @@ type Handler interface {
 	// round-trips, by construction, so this never rejects legitimate
 	// content.
 	RoundTrip(value string, t tag.Type) error
+
+	// CheckLiteral reports whether a decrypted value can be spliced over
+	// span unchanged. Line-based formats render verbatim, and their
+	// quotes aren't covered by the ciphertext's authentication, so a
+	// value can come back into a context it was never valid in (spec 05
+	// AC-5.23). YAML and JSON always accept: Render escapes for them.
+	CheckLiteral(span Span, value string) error
 }
 
 // Leaf is one scalar in a document, addressable by Path.

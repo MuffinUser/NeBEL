@@ -733,3 +733,39 @@ func TestHandlerRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// AC-5.14: the format comes from the base name, so the common
+// ".env.local" family is recognized even though its extension is ".local".
+func TestDetect(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		want Kind
+		ok   bool
+	}{
+		{"c.yaml", KindYAML, true},
+		{"c.yml", KindYAML, true},
+		{"c.json", KindJSON, true},
+		{"app.properties", KindProperties, true},
+		{"prod.env", KindEnv, true},
+		{".env", KindEnv, true},
+		{".env.local", KindEnv, true},
+		{".env.production", KindEnv, true},
+		{".env.json", KindJSON, true}, // a known extension wins
+		{".env.yaml", KindYAML, true},
+		{"*.env", KindEnv, true}, // a glob's last segment
+		{".env.*", KindEnv, true},
+		{"*.properties", KindProperties, true},
+		{"env", "", false},
+		{"x.envrc", "", false},
+		{"my.env.bak", "", false},
+		{"secrets.toml", "", false},
+		{"*", "", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := Detect(tt.name)
+			if got != tt.want || ok != tt.ok {
+				t.Errorf("Detect(%q) = %q, %v; want %q, %v", tt.name, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}

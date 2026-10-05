@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/MuffinUser/nebel/internal/tag"
 )
@@ -125,12 +126,52 @@ type Leaf struct {
 	Type  tag.Type
 }
 
-// For returns the handler for a file path, chosen by extension.
-func For(filePath string) (Handler, error) {
-	switch filepath.Ext(filePath) {
+// Kind names a supported file format.
+type Kind string
+
+const (
+	KindYAML       Kind = "yaml"
+	KindJSON       Kind = "json"
+	KindEnv        Kind = "env"
+	KindProperties Kind = "properties"
+)
+
+// LineBased reports whether k addresses values by literal key rather than
+// by dot-path: .env and .properties have no nesting, so a dot in a key is
+// just a character.
+func (k Kind) LineBased() bool {
+	return k == KindEnv || k == KindProperties
+}
+
+// Detect returns the format of a file from its base name (spec 05
+// AC-5.14). A known extension wins; otherwise ".env" and ".env.*" are
+// dotenv files, since ".env.local"'s extension is ".local". name may also
+// be a glob's last segment ("*.env", ".env.*"), which is how config
+// validation picks a key syntax before any file is matched.
+func Detect(name string) (Kind, bool) {
+	switch filepath.Ext(name) {
 	case ".yaml", ".yml":
-		return yamlHandler{}, nil
+		return KindYAML, true
 	case ".json":
+		return KindJSON, true
+	case ".properties":
+		return KindProperties, true
+	case ".env":
+		return KindEnv, true
+	}
+	if name == ".env" || strings.HasPrefix(name, ".env.") {
+		return KindEnv, true
+	}
+	return "", false
+}
+
+// For returns the handler for a file path, chosen by its base name.
+func For(filePath string) (Handler, error) {
+	kind, _ := Detect(filepath.Base(filePath))
+	switch kind {
+	case KindYAML:
+		return yamlHandler{}, nil
+	case KindJSON:
 		return jsonHandler{}, nil
 	}
 	return nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, filePath)

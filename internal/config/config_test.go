@@ -247,3 +247,37 @@ func writeTempConfig(t *testing.T, contents string) string {
 	}
 	return path
 }
+
+// AC-4.11: an encrypt entry is checked with the key syntax of the format
+// its rule's glob names. Literal .env/.properties keys that aren't valid
+// dot notation must load; a glob naming no format keeps dot notation.
+func TestLoadValidatesKeysByFormat(t *testing.T) {
+	for _, tt := range []struct {
+		name, files, key string
+		ok               bool
+	}{
+		{"properties dotted key", "*.properties", "a..b", true},
+		{"properties bracket", "**/*.properties", "foo[", true},
+		{"properties escaped space", "app.properties", "my key", true},
+		{"env literal", "*.env", "DATABASE_PASSWORD", true},
+		{"env.* glob", ".env.*", "API.KEY", true},
+		{"env with space", "*.env", "A B", false},
+		{"env with equals", "*.env", "A=B", false},
+		{"properties control char", "*.properties", "a\tb", false},
+		{"yaml dot path", "**/*.yaml", "database.password", true},
+		{"yaml bad path", "**/*.yaml", "a..b", false},
+		{"unknown glob dot path", "config/*", "database.password", true},
+		{"unknown glob bad path", "config/*", "api.keys[", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{Rules: []Rule{{Files: tt.files, Mode: ModeValue, Encrypt: []string{tt.key}}}}
+			err := cfg.Validate()
+			if tt.ok && err != nil {
+				t.Errorf("Validate() = %v, want nil", err)
+			}
+			if !tt.ok && !errors.Is(err, format.ErrBadPath) {
+				t.Errorf("Validate() = %v, want %v", err, format.ErrBadPath)
+			}
+		})
+	}
+}

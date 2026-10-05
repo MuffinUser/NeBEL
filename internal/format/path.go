@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // ErrBadPath is returned when a configured path is not valid dot notation.
@@ -78,4 +79,27 @@ func ParsePath(path string) ([]Step, error) {
 		}
 	}
 	return steps, nil
+}
+
+// ValidKey checks that key is a well-formed encrypt entry for format k
+// (spec 04 AC-4.11). YAML, JSON and an undetected format (k == "") take
+// dot notation; .env and .properties take a literal key, so "a..b" or
+// "foo[" are valid there even though ParsePath would reject them.
+func ValidKey(k Kind, key string) error {
+	if !k.LineBased() {
+		_, err := ParsePath(key)
+		return err
+	}
+	if key == "" {
+		return fmt.Errorf("%w: key is empty", ErrBadPath)
+	}
+	for _, r := range key {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("%w: key %q contains a control character", ErrBadPath, key)
+		}
+		if k == KindEnv && (unicode.IsSpace(r) || r == '=') {
+			return fmt.Errorf("%w: .env key %q contains whitespace or \"=\"", ErrBadPath, key)
+		}
+	}
+	return nil
 }

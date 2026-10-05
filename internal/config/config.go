@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 
 	"github.com/MuffinUser/nebel/internal/format"
 	"github.com/bmatcuk/doublestar/v4"
@@ -45,8 +46,9 @@ type Rule struct {
 	// Mode selects whole-file (ModeFile) or per-value (ModeValue) handling.
 	Mode Mode `yaml:"mode"`
 
-	// Encrypt lists the dot-notation paths to encrypt, for mode: value
-	// rules — "database.password", "api.keys[0]". Unused by mode: file.
+	// Encrypt lists the values to encrypt, for mode: value rules: dot
+	// paths for YAML/JSON ("database.password", "api.keys[0]"), literal
+	// keys for .env/.properties ("DATABASE_PASSWORD"). Unused by mode: file.
 	Encrypt []string `yaml:"encrypt,omitempty"`
 }
 
@@ -134,8 +136,16 @@ func (c *Config) Validate() error {
 			if len(r.Encrypt) == 0 {
 				return fmt.Errorf("%w: rule %q", ErrNoFields, r.Files)
 			}
+			// The key syntax depends on the format, which a glob only
+			// reveals through its last segment ("*.env", "**/*.properties").
+			// A glob that doesn't name one gets dot notation, so a typo in
+			// an existing YAML/JSON rule still fails here (AC-4.11).
+			kind, detected := format.Detect(path.Base(r.Files))
 			for _, field := range r.Encrypt {
-				if _, err := format.ParsePath(field); err != nil {
+				if err := format.ValidKey(kind, field); err != nil {
+					if !detected {
+						return fmt.Errorf("config: rule %q: %w (for a literal .env/.properties key, use a glob ending in .env or .properties)", r.Files, err)
+					}
 					return fmt.Errorf("config: rule %q: %w", r.Files, err)
 				}
 			}

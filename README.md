@@ -132,6 +132,22 @@ git add . && git commit -m "encrypt secrets"
 `.nebel.yaml` and `.gitattributes` are committed and shared; the password
 is not — distribute it to your team out of band.
 
+`add field` works on YAML, JSON, `.env` (`*.env`, `.env`, `.env.*`) and
+`.properties` files. For YAML/JSON a field is a dot path
+(`database.password`, `api.keys[0]`). For `.env`/`.properties` it is the
+key exactly as written (`DATABASE_PASSWORD`, `database.password`), and
+the value's quotes stay in the file:
+
+```sh
+nebel add field .env.local DATABASE_PASSWORD API_TOKEN
+# export DATABASE_PASSWORD="s3cr3t"  →  export DATABASE_PASSWORD="ENC[...]"
+```
+
+A key that appears more than once, or a value spanning several lines
+(a PEM key, a `.properties` continuation), is refused: use `add file` for
+those. Rules in `.nebel.yaml` match at the depth they're written, so write
+`**/*.env` by hand to cover `.env` files in every directory.
+
 Join an existing repo, after cloning — `init` prompts for the shared
 password:
 

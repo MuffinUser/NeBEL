@@ -175,8 +175,14 @@ properties library reports byte offsets, and AC-5.1 needs offsets.
   - `.properties`: no leading whitespace, and doesn't end in an odd
     number of backslashes.
 
-  The handler exposes the check (e.g. `CheckLiteral(src, span, literal)`),
-  and `filterop` (spec 06) calls it.
+  The handler exposes the check (`CheckLiteral(span, literal)`), and
+  `filterop` (spec 06) calls it.
+
+  Known limitation: the check catches literals that *can't* be written in
+  the new context. It doesn't catch ones that are valid there but read
+  differently. Example: `\"` means `"` inside double quotes but stays
+  `\"` unquoted, so `KEY="a\"b"` edited to `KEY=a\"b` decrypts without
+  error. Closing this would mean binding the quote style into the AAD.
 
 ## `.env`
 

@@ -242,9 +242,10 @@ func cleanValues(rule config.Rule, version int, key []byte, haveKey bool, filePa
 }
 
 // smudgeValues reverses cleanValues, restoring each scalar's original type
-// from its tag. An untagged field passes through unchanged (AC-6.7); a
-// tagged one that fails to parse or authenticate is reported rather than
-// written out as wrong-but-plausible plaintext (AC-6.9). Each field selects
+// from its tag, or for .env/.properties the raw literal it was written as.
+// An untagged field passes through unchanged (AC-6.7); a tagged one that
+// fails to parse or authenticate is reported rather than written out as
+// wrong-but-plausible plaintext (AC-6.9). Each field selects
 // its key by its own tag-declared version (AC-6.13), not the config's
 // current version — one the keyring doesn't hold is left tagged, as-is,
 // and named in the returned []Skipped (AC-6.11), independently of every
@@ -309,6 +310,13 @@ func smudgeValues(rule config.Rule, keyring Keyring, filePath string, input []by
 		// reach this in practice (its type can't change without failing
 		// the Decrypt above), so this never rejects legitimate content.
 		if err := validTypeLiteral(handler, string(plaintext), parsed.Type); err != nil {
+			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, err)
+		}
+		// Line-based formats write the value back verbatim, and the quotes
+		// around it aren't authenticated: one edited since clean could
+		// turn a correctly decrypted value into a different one, or a
+		// crafted value into new lines (spec 06 AC-6.15).
+		if err := handler.CheckLiteral(span, string(plaintext)); err != nil {
 			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, err)
 		}
 		rendered, err := handler.Render(string(plaintext), parsed.Type)

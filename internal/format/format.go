@@ -208,6 +208,8 @@ func For(filePath string) (Handler, error) {
 		return jsonHandler{}, nil
 	case KindEnv:
 		return envHandler{}, nil
+	case KindProperties:
+		return propertiesHandler{}, nil
 	}
 	return nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, filePath)
 }

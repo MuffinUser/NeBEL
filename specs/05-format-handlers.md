@@ -146,7 +146,10 @@ properties library reports byte offsets, and AC-5.1 needs offsets.
   key.
 - **AC-5.20 Empty value**: `KEY=` (or `KEY=""`) locates a zero-length span
   at the value position and is encrypted like any other value. Leaving it
-  unencrypted would reveal that the secret is blank.
+  unencrypted would reveal that the secret is blank. For an empty
+  *unquoted* `.env` value the span sits directly after `=`, so in
+  `KEY= # note` the tag lands before the whitespace and the comment still
+  parses as a comment after clean.
 - **AC-5.21 Render is verbatim**: `Render(value, t)` returns `value`
   unchanged for both formats, both for an `ENC[...]` tag on clean and
   for the raw literal on smudge. Quotes live outside the span, so there is
@@ -197,7 +200,9 @@ unquoted  := runs to end of line, stopping before WS+ "#"; trailing WS excluded
   `KEY='ENC[...]'` and `KEY="ENC[...]"` respectively. Inside double
   quotes, `\"` doesn't close the value and stays in the raw literal as is.
 - **AC-5.24 `export` prefix**: `export KEY=value` is located by `KEY`,
-  and `export ` is preserved outside the span.
+  and `export ` is preserved outside the span. `export` is a prefix only
+  when whitespace follows it, so `export=foo` is an ordinary entry with the
+  key `export`.
 - **AC-5.25 Inline comments**: for an unquoted value, whitespace followed
   by `#` starts a comment that is excluded from the span and preserved.
   A `#` not preceded by whitespace (`KEY=abc#def`) is part of the value.
@@ -228,7 +233,14 @@ ever decoded.
   to find entry boundaries, and `Locate` on a key whose value continues
   is `ErrMultiline` (AC-5.18). Decided: rejected, not supported, in v1.
 - **AC-5.28 Comments**: lines whose first non-whitespace character is `#`
-  or `!` are comments.
+  or `!` are comments. A comment line never continues onto the next line,
+  as in Java.
+- **AC-5.31 Key with no separator**: a line holding only a key (`key`,
+  which Java reads as an empty value) is a recognized entry and counts for
+  duplicate detection (AC-5.17). Locating it is refused with
+  `ErrMalformed`, and `Leaves` omits it. A zero-length span there would
+  splice the tag straight onto the key (`keyENC[...]`). The error asks for
+  `key=` instead.
 - **AC-5.29 Key matching on the logical key**: a configured key is
   compared with the key as Java would read it, with `\ `, `\:`, `\=`,
   `\\`, `\t`/`\n`/… and `\uXXXX` escapes resolved. So `my\ key` is matched

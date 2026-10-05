@@ -79,6 +79,12 @@ Specs: 05 § Line-based formats (AC-5.9–5.30), 04 AC-4.11, 06 AC-6.14–6.15,
 8. **Docs** — README format table and examples, plus the `**/*.env` glob
    note.
 
+## Upgrading
+
+No migration. Before this feature `format.For` rejected `.env` and
+`.properties`, so no repository can hold value-mode ciphertext for them
+yet. The first release that ships it pins the span boundaries (see Risks).
+
 ## Risks
 
 - **Span boundaries are permanent once shipped.** Committed ciphertext

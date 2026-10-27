@@ -283,3 +283,18 @@ func mustRender(t *testing.T, h Handler, value string, typ tag.Type) string {
 	}
 	return out
 }
+
+// AC-5.34: whitespace inside the quotes is part of the value, so around a
+// tag it is refused rather than encrypting the tag text on the next clean.
+func TestEnvWhitespaceAroundQuotedTag(t *testing.T) {
+	h, _ := For(".env")
+	tagged := "ENC[AES256_SIV_TB,key:1,data:" + strings.Repeat("A", 44) + ",type:str]"
+	for _, src := range []string{`PW="` + tagged + ` "`, `PW=' ` + tagged + `'`} {
+		if _, err := h.Locate([]byte(src+"\n"), "PW"); !errors.Is(err, ErrMalformed) {
+			t.Errorf("Locate(%s) error = %v, want %v", src, err, ErrMalformed)
+		}
+	}
+	if _, err := h.Locate([]byte("PW=\" secret \"\n"), "PW"); err != nil {
+		t.Errorf("whitespace in a quoted plaintext value: %v", err)
+	}
+}

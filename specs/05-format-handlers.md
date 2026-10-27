@@ -283,5 +283,7 @@ ever decoded.
   smudge would fail to parse it, and clean would encrypt the tag text as
   if it were plaintext. `Locate` refuses such an entry with
   `ErrMalformed` asking to remove the whitespace, on clean and smudge
-  alike. Whitespace after a plaintext value is kept and encrypted as
-  usual.
+  alike. The same holds for whitespace around a tag inside `.env` quotes
+  (`KEY=" ENC[...] "`), which is part of the value too; a bare `.env`
+  value's surrounding whitespace is already outside the span. Whitespace
+  in a plaintext value is kept and encrypted as usual.

@@ -145,6 +145,12 @@ func scanEnv(src []byte) ([]entry, error) {
 			}
 			e.multiline = j > i
 			e.span = Span{Start: v + 1, End: closing, Value: string(src[v+1 : closing]), Type: tag.TypeStr, ctx: ctx}
+			// Whitespace inside the quotes is part of the value, so
+			// around a tag it would make the tag unreadable, as in
+			// .properties (AC-5.34).
+			if trimmed := strings.Trim(e.span.Value, " \t"); trimmed != e.span.Value && tag.LooksEncrypted([]byte(trimmed)) {
+				e.refuse = malformed(n, "whitespace around the ENC[...] tag of %q inside its quotes; remove it", key)
+			}
 			entries = append(entries, e)
 			// Lines inside the quotes aren't entries here, but a reader
 			// without multi-line quotes takes a KEY= line for one, and

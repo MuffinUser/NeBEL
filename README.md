@@ -143,10 +143,18 @@ nebel add field .env.local DATABASE_PASSWORD API_TOKEN
 # export DATABASE_PASSWORD="s3cr3t"  →  export DATABASE_PASSWORD="ENC[...]"
 ```
 
+The quotes are authenticated along with the value. Re-quoting the
+plaintext in your working tree is fine, but changing the quotes around
+an `ENC[...]` tag makes checkout fail for that key until they're
+restored.
+
 A key that appears more than once, or a value spanning several lines
 (a PEM key, a `.properties` continuation), is refused: use `add file` for
-those. Rules in `.nebel.yaml` match at the depth they're written, so write
-`**/*.env` by hand to cover `.env` files in every directory.
+those. Rules in `.nebel.yaml` match at the depth they're written, while
+the `.gitattributes` line `add` writes matches at any depth. A nested
+`svc/.env` then fails `git add` and checkout with "no rule in .nebel.yaml
+matches it"; write `**/*.env` by hand to cover `.env` files in every
+directory.
 
 Join an existing repo, after cloning — `init` prompts for the shared
 password:

@@ -137,23 +137,99 @@ func TestLineFormatsMixedVersions(t *testing.T) {
 	}
 }
 
-// AC-6.15: quotes edited after clean so the decrypted literal can no
-// longer be written there are an error, not a broken file. A value that
-// was single-quoted because it contains '"' can't go back inside double
-// quotes that a linter put around its tag.
+// AC-6.16: the quotes around a .env value are bound into its AAD, so
+// re-quoting a tag after clean fails authentication rather than smudging
+// the same raw literal into a context where it means something else.
 func TestLineFormatsSmudgeRejectsChangedQuotes(t *testing.T) {
 	path := "a.env"
-	cfg := &config.Config{Rules: []config.Rule{{Files: "*.env", Mode: config.ModeValue, Encrypt: []string{"GREETING"}}}}
-	cleaned, err := Clean(cfg, testKeyring, path, []byte("GREETING='say \"hi\"'\n"))
+	cfg := &config.Config{Rules: []config.Rule{{Files: "*.env", Mode: config.ModeValue, Encrypt: []string{"V"}}}}
+	for _, tt := range []struct {
+		name, src string
+		requote   *strings.Replacer
+	}{
+		{"double to single", "V=\"a\\nb$HOME\"\n", strings.NewReplacer(`"`, `'`)},
+		{"single to double", "V='a\\nb$HOME'\n", strings.NewReplacer(`'`, `"`)},
+		{"bare to double", "V=a\\nb\n", strings.NewReplacer(`=ENC`, `="ENC`, "]\n", "]\"\n")},
+		{"single to bare", "V='a b'\n", strings.NewReplacer(`'`, ``)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cleaned, err := Clean(cfg, testKeyring, path, []byte(tt.src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			requoted := tt.requote.Replace(string(cleaned))
+			if requoted == string(cleaned) {
+				t.Fatal("test setup: quotes not replaced")
+			}
+			if _, _, err := Smudge(cfg, testKeyring, path, []byte(requoted)); !errors.Is(err, siv.ErrAuth) {
+				t.Errorf("Smudge(%q) error = %v, want %v", requoted, err, siv.ErrAuth)
+			}
+		})
+	}
+}
+
+// AC-6.16: only quoting is bound. Whitespace before a bare .env value and
+// the .properties separator don't change the value, so editing them after
+// clean still smudges.
+func TestLineFormatsUnboundSyntaxStillSmudges(t *testing.T) {
+	for _, tt := range []struct {
+		path, key, src string
+		edit           *strings.Replacer
+		want           string
+	}{
+		{"a.env", "V", "V=secret\n", strings.NewReplacer("V=", "V= "), "V= secret\n"},
+		{"a.properties", "v", "v=secret\n", strings.NewReplacer("v=", "v : "), "v : secret\n"},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			cfg := &config.Config{Rules: []config.Rule{{Files: "a.*", Mode: config.ModeValue, Encrypt: []string{tt.key}}}}
+			cleaned, err := Clean(cfg, testKeyring, tt.path, []byte(tt.src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, _, err := Smudge(cfg, testKeyring, tt.path, []byte(tt.edit.Replace(string(cleaned))))
+			if err != nil || string(got) != tt.want {
+				t.Errorf("Smudge = %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
+// AC-6.16: line formats never had legacy value tags, so one is refused on
+// clean (git add) and on smudge (checkout) instead of decrypting without
+// the quote binding.
+func TestLineFormatsRefuseLegacyTags(t *testing.T) {
+	path := "a.env"
+	cfg := &config.Config{Rules: []config.Rule{{Files: "*.env", Mode: config.ModeValue, Encrypt: []string{"V"}}}}
+	ciphertext, err := siv.Encrypt(testKey, []byte("x"), siv.AAD(siv.ModeValue, path, "V"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	requoted := strings.NewReplacer(`='ENC`, `="ENC`, `]'`, `]"`).Replace(string(cleaned))
-	if requoted == string(cleaned) {
-		t.Fatal("test setup: quotes not replaced")
+	legacy := strings.Replace(tag.EncodeValue(ciphertext, 1, tag.TypeStr), tag.AlgoAES256SIVTypeBound+",", tag.AlgoAES256SIV+",", 1)
+	doc := []byte("V=\"" + legacy + "\"\n")
+	if _, err := Clean(cfg, testKeyring, path, doc); !errors.Is(err, errLegacyLineTag) {
+		t.Errorf("Clean error = %v, want %v", err, errLegacyLineTag)
 	}
-	if _, _, err := Smudge(cfg, testKeyring, path, []byte(requoted)); !errors.Is(err, format.ErrLiteralContext) {
-		t.Errorf("Smudge error = %v, want %v", err, format.ErrLiteralContext)
+	if _, _, err := Smudge(cfg, testKeyring, path, doc); !errors.Is(err, errLegacyLineTag) {
+		t.Errorf("Smudge error = %v, want %v", err, errLegacyLineTag)
+	}
+}
+
+// AC-6.15: a correctly bound .env value that still doesn't fit its quotes
+// (only possible from a crafted tag) is refused by the context guard.
+func TestLineFormatsSmudgeRejectsCraftedEnvLiteral(t *testing.T) {
+	path := "a.env"
+	cfg := &config.Config{Rules: []config.Rule{{Files: "*.env", Mode: config.ModeValue, Encrypt: []string{"V"}}}}
+	for name, plaintext := range map[string]string{"line break": "x\nADMIN=true", "closing quote": `x" ADMIN="true`} {
+		t.Run(name, func(t *testing.T) {
+			ciphertext, err := siv.Encrypt(testKey, []byte(plaintext), siv.AAD(siv.ModeValue, path, "V", string(tag.TypeStr), "env:double"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			doc := "V=\"" + tag.EncodeValue(ciphertext, 1, tag.TypeStr) + "\"\n"
+			if _, _, err := Smudge(cfg, testKeyring, path, []byte(doc)); !errors.Is(err, format.ErrLiteralContext) {
+				t.Errorf("Smudge error = %v, want %v", err, format.ErrLiteralContext)
+			}
+		})
 	}
 }
 

@@ -56,8 +56,9 @@ var (
 	ErrMalformed = errors.New("format: malformed line")
 
 	// ErrLiteralContext is returned when a decrypted value can't be
-	// written back where its tag now sits, e.g. because the quotes around
-	// the tag changed after it was encrypted (AC-5.25).
+	// written back where its tag now sits, e.g. a crafted value holding a
+	// line break (AC-5.25). Quotes changed since clean fail authentication
+	// before this check is reached (spec 06 AC-6.16).
 	ErrLiteralContext = errors.New("format: decrypted value does not fit its surrounding quotes")
 )
 
@@ -100,9 +101,31 @@ type Span struct {
 	// can restore it.
 	Type tag.Type
 
-	// ctx is the quoting a line-based value sits in, for CheckLiteral.
-	// Zero for YAML and JSON, whose Render escapes whatever it is given.
+	// ctx is the quoting a line-based value sits in, for CheckLiteral and
+	// QuoteBinding. Zero for YAML and JSON, whose Render escapes whatever
+	// it is given.
 	ctx valueContext
+}
+
+// QuoteBinding names the quoting a value sits in, for binding into the
+// value's AAD (spec 06 AC-6.16), or "" where quoting can't change what a
+// literal means. Only .env has such quoting: the same raw literal reads
+// differently bare, in single quotes and in double quotes ("\n", "$x").
+// Whitespace before a bare value and the .properties separator style
+// don't change the value, so they aren't bound.
+//
+// The strings are part of the stored format: changing one makes every
+// committed .env value fail authentication.
+func (s Span) QuoteBinding() string {
+	switch s.ctx {
+	case ctxEnvBare, ctxEnvBareSpaced:
+		return "env:bare"
+	case ctxEnvSingle:
+		return "env:single"
+	case ctxEnvDouble:
+		return "env:double"
+	}
+	return ""
 }
 
 // Handler locates and renders scalars for one file format.

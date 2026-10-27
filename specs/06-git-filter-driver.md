@@ -90,8 +90,8 @@ See REQUIREMENTS.md § Git integration, § Bootstrapping & no-key operation.
 - **AC-6.14 Line formats through the filter**: for a `mode: value` rule
   matching a `.env` or `.properties` file (spec 05 AC-5.16), AC-6.2
   through AC-6.13 hold unchanged. The AAD field component is the
-  configured literal key, e.g. `siv.AAD(ModeValue, "prod.env",
-  "DATABASE_PASSWORD")`. The plaintext encrypted is the raw literal
+  configured literal key, e.g. `siv.AAD(ModeValue, "app.properties",
+  "database.password", "str")`; `.env` adds its quote style (AC-6.16). The plaintext encrypted is the raw literal
   (spec 05 § Line-based formats), and the tag's type is `str`. A golden
   test pins one `.env` and one `.properties` ciphertext, so a change to
   span boundaries (which would re-encrypt every committed value) can't
@@ -100,3 +100,21 @@ See REQUIREMENTS.md § Git integration, § Bootstrapping & no-key operation.
   a decrypted value that isn't valid in its current quote context, or that
   contains `\n`/`\r` (spec 05 AC-5.25), with an error naming file and
   key, handled the same way as a tampered tag under AC-6.9.
+- **AC-6.16 `.env` quote style is authenticated**: the same raw literal
+  means different things bare, in single quotes and in double quotes
+  (`\n`, `\"`, `$VAR`), and the quotes sit outside the ciphertext. A
+  `.env` value's AAD therefore appends its quote style after the type:
+  `siv.AAD(ModeValue, path, key, "str", q)` with `q` one of `env:bare`,
+  `env:single`, `env:double`. These strings and their position are part
+  of the stored format. Changing the quotes around an *encrypted* value
+  (the committed form, or tags passed through in a clone without the
+  key) makes smudge fail authentication for that key; the error says the
+  quotes may have changed, and restoring them fixes it. Re-quoting the
+  plaintext in the working tree is fine: clean re-encrypts it under the
+  new quote style.
+  Only quoting is bound: whitespace before a bare value doesn't change
+  it, and `.properties` has no quoting, so its AAD is the plain
+  type-bound one.
+  `.env` and `.properties` values only ever carry type-bound tags. A
+  legacy (`AES256_SIV`) value tag in such a file would decrypt without
+  the binding, so clean and smudge both refuse it.

@@ -154,7 +154,7 @@ func TestGoldenFixtureStaysBoundToItsPath(t *testing.T) {
 // whose bytes predate per-value mode for these formats.
 func goldenLineRules() []config.Rule {
 	return []config.Rule{
-		{Files: "config/*.env", Mode: config.ModeValue, Encrypt: []string{"DATABASE_PASSWORD", "API_TOKEN"}},
+		{Files: "config/*.env", Mode: config.ModeValue, Encrypt: []string{"DATABASE_PASSWORD", "API_TOKEN", "GREETING"}},
 		{Files: "config/*.properties", Mode: config.ModeValue, Encrypt: []string{"database.password", "api.token"}},
 	}
 }
@@ -165,13 +165,14 @@ func goldenLineRules() []config.Rule {
 // change to span boundaries is self-consistent but re-encrypts every
 // committed value (spec 06 AC-6.14). The values cover a quoted literal
 // with an escape, an inline comment, a \uXXXX escape and trailing
-// whitespace.
+// whitespace, and all three .env quote bindings (AC-6.16).
 func goldenLinePlaintexts() map[string][]byte {
 	return map[string][]byte{
 		"config/prod.env": []byte("# frozen fixture\n" +
 			"APP_NAME=nebel\n" +
 			"export DATABASE_PASSWORD=\"p@ss \\\"word\\\"\"   # rotate quarterly\n" +
-			"API_TOKEN=tok_live#1\n"),
+			"API_TOKEN=tok_live#1\n" +
+			"GREETING='say \"hi\" $USER'\n"),
 		"config/app.properties": []byte("# frozen fixture\n" +
 			"database.url=jdbc:postgresql://db/app\n" +
 			"database.password = caf\\u00e9 s3cr3t  \n" +

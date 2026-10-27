@@ -160,11 +160,13 @@ properties library reports byte offsets, and AC-5.1 needs offsets.
   `Type` = `str`. Entries with a duplicated key (AC-5.19) or a multi-line
   value (AC-5.20) are omitted, because selecting them could only fail.
 - **AC-5.25 Smudge checks the literal against its current context**:
-  quotes are outside the span and outside the AAD, so they can change
-  after clean (hand edit, linter auto-fix) without failing
-  authentication. Before splicing, smudge checks that the decrypted raw
-  literal is valid where the tag *now* sits, and errors otherwise rather
-  than writing a silently different value:
+  quotes are outside the span. For `.env` the quote style is bound into
+  the AAD (spec 06 AC-6.16), so re-quoting a tag after clean fails
+  authentication. What the AAD can't rule out is a crafted tag whose
+  plaintext doesn't fit the quotes it was encrypted for. Before
+  splicing, smudge therefore checks that the decrypted raw literal is
+  valid where the tag sits, and errors otherwise rather than writing a
+  broken or injected line:
   - any line format: no `\n` or `\r` (clean can never produce one,
     AC-5.17/5.20; one could only come from a crafted tag and would inject
     new lines);
@@ -176,13 +178,8 @@ properties library reports byte offsets, and AC-5.1 needs offsets.
     number of backslashes.
 
   The handler exposes the check (`CheckLiteral(span, literal)`), and
-  `filterop` (spec 06) calls it.
-
-  Known limitation: the check catches literals that *can't* be written in
-  the new context. It doesn't catch ones that are valid there but read
-  differently. Example: `\"` means `"` inside double quotes but stays
-  `\"` unquoted, so `KEY="a\"b"` edited to `KEY=a\"b` decrypts without
-  error. Closing this would mean binding the quote style into the AAD.
+  `filterop` (spec 06) calls it. The handler also exposes the quote
+  style for the AAD (`Span.QuoteBinding()`).
 
 ## `.env`
 

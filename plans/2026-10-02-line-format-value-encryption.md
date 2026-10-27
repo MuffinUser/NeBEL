@@ -96,6 +96,10 @@ yet. The first release that ships it pins the span boundaries (see Risks).
   closed (`ErrMalformed`) rather than being guessed at.
 - **Tampering via line injection** is covered by SIV authentication plus
   the smudge context guard (AC-6.15).
-- **Quote edits after clean** (e.g. dotenv-linter) aren't authenticated.
-  The context guard turns them into a visible smudge error instead of a
-  silently different value.
+- **Quote edits on the encrypted form** are authenticated for `.env`:
+  the quote style is in the AAD (spec 06 AC-6.16), so re-quoting a tag
+  (e.g. a linter run on committed blobs, or an edit in a clone without
+  the key) makes checkout fail for that key until the quotes are
+  restored. That's deliberate: the alternative is smudging `"a\nb"` back
+  as `'a\nb'`, a silently different value. Linting the plaintext working
+  tree is unaffected, since clean re-encrypts under the new quotes.

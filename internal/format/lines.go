@@ -41,8 +41,8 @@ type physLine struct {
 
 // splitLines splits src into physical lines with offsets into src itself,
 // so spans located on them splice over the real bytes. A leading UTF-8
-// BOM is skipped (AC-5.16). "\n" and "\r\n" end a line; with loneCR, a
-// bare "\r" does too, as in java.util.Properties (AC-5.15). Without it, a
+// BOM is skipped (AC-5.18). "\n" and "\r\n" end a line; with loneCR, a
+// bare "\r" does too, as in java.util.Properties (AC-5.17). Without it, a
 // bare "\r" stays in the line's content for the caller to reject.
 func splitLines(src []byte, loneCR bool) []physLine {
 	pos := 0
@@ -89,9 +89,9 @@ type entry struct {
 	// span is the value's location. Meaningful only when the entry is
 	// locatable (neither multiline nor noSeparator).
 	span Span
-	// multiline marks a value continued onto later lines (AC-5.18).
+	// multiline marks a value continued onto later lines (AC-5.20).
 	multiline bool
-	// noSeparator marks a .properties line holding only a key (AC-5.31).
+	// noSeparator marks a .properties line holding only a key (AC-5.33).
 	noSeparator bool
 }
 
@@ -130,7 +130,7 @@ func locateEntry(entries []entry, key string) (Span, error) {
 }
 
 // entryLeaves lists the entries locateEntry would accept, in source order
-// (AC-5.22): offering any other would hand the user a key that can only
+// (AC-5.24): offering any other would hand the user a key that can only
 // fail.
 func entryLeaves(entries []entry) []Leaf {
 	count := map[string]int{}

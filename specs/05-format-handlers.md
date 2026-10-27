@@ -104,7 +104,7 @@ Both formats are parsed by small handwritten line tokenizers in
 `internal/format`, with no new dependency. No maintained Go dotenv or
 properties library reports byte offsets, and AC-5.1 needs offsets.
 
-- **AC-5.14 Format detection by name**: `format.For` picks a handler
+- **AC-5.16 Format detection by name**: `format.For` picks a handler
   from the file's *base name*, in this order:
   1. extension `.yaml`/`.yml` → YAML, `.json` → JSON, `.properties` →
      properties, `.env` → env;
@@ -114,7 +114,7 @@ properties library reports byte offsets, and AC-5.1 needs offsets.
   A known extension wins over the `.env.` prefix, so `.env.json` is JSON.
   Anything else is `ErrUnsupportedFormat`. A table test lists matching and
   non-matching names.
-- **AC-5.15 CRLF**: on a file with `\r\n` line endings, located spans and
+- **AC-5.17 CRLF**: on a file with `\r\n` line endings, located spans and
   `Span.Value` never include the `\r`, and AC-5.1 holds with the CRs left
   in place. This is the line-format equivalent of the YAML CRLF fix in
   70d7d5f; a Windows checkout with `core.autocrlf=true` must round-trip.
@@ -123,15 +123,15 @@ properties library reports byte offsets, and AC-5.1 needs offsets.
   `.properties` it is a line terminator, as in `java.util.Properties`, so
   `a=1\rpassword=x` is two entries. In `.env` it is `ErrMalformed`. So a
   located raw literal can never contain `\r` or `\n`.
-- **AC-5.16 BOM**: a leading UTF-8 BOM is not part of the first key, and
+- **AC-5.18 BOM**: a leading UTF-8 BOM is not part of the first key, and
   it is preserved byte-for-byte.
-- **AC-5.17 Duplicate configured key rejected**: if a configured key
+- **AC-5.19 Duplicate configured key rejected**: if a configured key
   occurs more than once in the file, `Locate` fails with
   `ErrDuplicateKey`, naming the key and every line number it appears on.
   Both formats use the *last* occurrence at runtime, so encrypting any one
   occurrence could leave the effective value in plaintext. Duplicates of
   keys *not* configured are ignored.
-- **AC-5.18 Multi-line values: tokenized, never located**: the tokenizer
+- **AC-5.20 Multi-line values: tokenized, never located**: the tokenizer
   recognizes multi-line constructs (`.properties` continuation lines, a
   `.env` quoted value whose closing quote is on a later line). That way it
   never misreads a continuation line such as `  password=x` as a key of
@@ -139,34 +139,34 @@ properties library reports byte offsets, and AC-5.1 needs offsets.
   line fails with `ErrMultiline`; the error suggests `mode: file` for
   values like PEM keys. This resolves AC-5.13. Support can be added later
   without a format break, because no such tag can exist yet.
-- **AC-5.19 Malformed line rejected**: a line that is neither blank, a
+- **AC-5.21 Malformed line rejected**: a line that is neither blank, a
   comment, nor a key/value entry fails `Locate` and `Leaves` with
   `ErrMalformed`, naming the line number. The handler fails closed rather
   than skipping text it doesn't understand, since that text might hide a
   key.
-- **AC-5.20 Empty value**: `KEY=` (or `KEY=""`) locates a zero-length span
+- **AC-5.22 Empty value**: `KEY=` (or `KEY=""`) locates a zero-length span
   at the value position and is encrypted like any other value. Leaving it
   unencrypted would reveal that the secret is blank. For an empty
   *unquoted* `.env` value the span sits directly after `=`, so in
   `KEY= # note` the tag lands before the whitespace and the comment still
   parses as a comment after clean.
-- **AC-5.21 Render is verbatim**: `Render(value, t)` returns `value`
+- **AC-5.23 Render is verbatim**: `Render(value, t)` returns `value`
   unchanged for both formats, both for an `ENC[...]` tag on clean and
   for the raw literal on smudge. Quotes live outside the span, so there is
   nothing to add. An `ENC[...]` tag is safe as an unquoted value in both
   formats: it contains no whitespace, `#`, `!`, `$`, quote or backslash.
-- **AC-5.22 Picker leaves**: `Leaves` returns every key/value entry in
+- **AC-5.24 Picker leaves**: `Leaves` returns every key/value entry in
   source order, with `Path` = literal key, `Value` = raw literal,
-  `Type` = `str`. Entries with a duplicated key (AC-5.17) or a multi-line
-  value (AC-5.18) are omitted, because selecting them could only fail.
-- **AC-5.23 Smudge checks the literal against its current context**:
+  `Type` = `str`. Entries with a duplicated key (AC-5.19) or a multi-line
+  value (AC-5.20) are omitted, because selecting them could only fail.
+- **AC-5.25 Smudge checks the literal against its current context**:
   quotes are outside the span and outside the AAD, so they can change
   after clean (hand edit, linter auto-fix) without failing
   authentication. Before splicing, smudge checks that the decrypted raw
   literal is valid where the tag *now* sits, and errors otherwise rather
   than writing a silently different value:
   - any line format: no `\n` or `\r` (clean can never produce one,
-    AC-5.15/5.18; one could only come from a crafted tag and would inject
+    AC-5.17/5.20; one could only come from a crafted tag and would inject
     new lines);
   - `.env` double-quoted: no unescaped `"`;
   - `.env` single-quoted: no `'`;
@@ -205,20 +205,20 @@ unquoted  := runs to end of line, stopping before WS+ "#"; trailing WS excluded
   covers `value` only, so clean produces `KEY=ENC[...]`,
   `KEY='ENC[...]'` and `KEY="ENC[...]"` respectively. Inside double
   quotes, `\"` doesn't close the value and stays in the raw literal as is.
-- **AC-5.24 `export` prefix**: `export KEY=value` is located by `KEY`,
+- **AC-5.26 `export` prefix**: `export KEY=value` is located by `KEY`,
   and `export ` is preserved outside the span. `export` is a prefix only
   when whitespace follows it, so `export=foo` is an ordinary entry with the
   key `export`.
-- **AC-5.25 Inline comments**: for an unquoted value, whitespace followed
+- **AC-5.27 Inline comments**: for an unquoted value, whitespace followed
   by `#` starts a comment that is excluded from the span and preserved.
   A `#` not preceded by whitespace (`KEY=abc#def`) is part of the value.
   After a closing quote, only whitespace and an optional `# comment` may
   follow; anything else is `ErrMalformed`.
-- **AC-5.26 Spaces around `=`**: `KEY = value` locates `value`, and the
+- **AC-5.28 Spaces around `=`**: `KEY = value` locates `value`, and the
   surrounding whitespace is preserved outside the span.
-- **AC-5.27 Unterminated quote**: a quote that is never closed by end of
+- **AC-5.29 Unterminated quote**: a quote that is never closed by end of
   file is `ErrMalformed`. One closed on a later line is the multi-line
-  case (AC-5.18).
+  case (AC-5.20).
 
 ## `.properties`
 
@@ -237,22 +237,22 @@ ever decoded.
 - **AC-5.13 Line continuation**: a line ending in an odd number of
   backslashes continues onto the next line. The tokenizer joins such lines
   to find entry boundaries, and `Locate` on a key whose value continues
-  is `ErrMultiline` (AC-5.18). Decided: rejected, not supported, in v1.
-- **AC-5.28 Comments**: lines whose first non-whitespace character is `#`
+  is `ErrMultiline` (AC-5.20). Decided: rejected, not supported, in v1.
+- **AC-5.30 Comments**: lines whose first non-whitespace character is `#`
   or `!` are comments. A comment line never continues onto the next line,
   as in Java.
-- **AC-5.31 Key with no separator**: a line holding only a key (`key`,
+- **AC-5.33 Key with no separator**: a line holding only a key (`key`,
   which Java reads as an empty value) is a recognized entry and counts for
-  duplicate detection (AC-5.17). Locating it is refused with
+  duplicate detection (AC-5.19). Locating it is refused with
   `ErrMalformed`, and `Leaves` omits it. A zero-length span there would
   splice the tag straight onto the key (`keyENC[...]`). The error asks for
   `key=` instead.
-- **AC-5.29 Key matching on the logical key**: a configured key is
+- **AC-5.31 Key matching on the logical key**: a configured key is
   compared with the key as Java would read it, with `\ `, `\:`, `\=`,
   `\\`, `\t`/`\n`/… and `\uXXXX` escapes resolved. So `my\ key` is matched
-  by the configured key `my key`. Duplicate detection (AC-5.17) uses the
+  by the configured key `my key`. Duplicate detection (AC-5.19) uses the
   same logical key, so `ab` and `ab` count as the same key. Only the
   *value* is raw-literal; the key itself is never rewritten.
-- **AC-5.30 Escapes in values stay raw**: `\uXXXX` and other escapes in a
+- **AC-5.32 Escapes in values stay raw**: `\uXXXX` and other escapes in a
   value are part of the encrypted raw literal and come back unchanged on
   smudge.

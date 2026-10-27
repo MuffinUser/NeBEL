@@ -29,7 +29,7 @@ long=first \
      second
 `
 
-// AC-5.11, AC-5.12, AC-5.20, AC-5.28-5.30: each key's span covers exactly
+// AC-5.11, AC-5.12, AC-5.22, AC-5.30-5.32: each key's span covers exactly
 // the raw literal; separators and leading whitespace stay outside it.
 func TestPropertiesLocate(t *testing.T) {
 	h, err := For("app.properties")
@@ -121,7 +121,7 @@ func TestPropertiesSpliceRoundTrip(t *testing.T) {
 	}
 }
 
-// AC-5.13, AC-5.17, AC-5.18, AC-5.29, AC-5.31: refusals.
+// AC-5.13, AC-5.19, AC-5.20, AC-5.31, AC-5.33: refusals.
 func TestPropertiesLocateErrors(t *testing.T) {
 	for _, tt := range []struct {
 		name, src, key string
@@ -146,7 +146,7 @@ func TestPropertiesLocateErrors(t *testing.T) {
 	}
 }
 
-// AC-5.18, AC-5.28: a continuation line is never read as an entry of its
+// AC-5.20, AC-5.30: a continuation line is never read as an entry of its
 // own, even when it looks like one; a comment line never continues.
 func TestPropertiesContinuationAndComments(t *testing.T) {
 	src := "note=see \\\n  password=inner\npassword=outer\n# comment \\\nother=1\n"
@@ -163,7 +163,7 @@ func TestPropertiesContinuationAndComments(t *testing.T) {
 	}
 }
 
-// AC-5.16: a BOM is not part of the first key.
+// AC-5.18: a BOM is not part of the first key.
 func TestPropertiesBOM(t *testing.T) {
 	h, _ := For("app.properties")
 	if _, err := h.Locate([]byte("\xEF\xBB\xBFa=1\n"), "a"); err != nil {
@@ -171,7 +171,7 @@ func TestPropertiesBOM(t *testing.T) {
 	}
 }
 
-// AC-5.23: a literal Java would read back differently is refused.
+// AC-5.25: a literal Java would read back differently is refused.
 func TestPropertiesCheckLiteral(t *testing.T) {
 	h, _ := For("app.properties")
 	locate := func(src string) Span {

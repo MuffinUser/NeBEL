@@ -36,14 +36,14 @@ func (propertiesHandler) Leaves(src []byte) ([]Leaf, error) {
 	return entryLeaves(entries), nil
 }
 
-// Render returns value verbatim (AC-5.21).
+// Render returns value verbatim (AC-5.23).
 func (propertiesHandler) Render(value string, _ tag.Type) (string, error) { return value, nil }
 
 // RoundTrip accepts only strings, as for .env.
 func (propertiesHandler) RoundTrip(_ string, t tag.Type) error { return lineTypeRoundTrip(t) }
 
 // CheckLiteral rejects a value Java would read back differently where its
-// tag now sits (AC-5.23).
+// tag now sits (AC-5.25).
 func (propertiesHandler) CheckLiteral(span Span, value string) error {
 	if err := checkNoLineBreak(value); err != nil {
 		return err
@@ -67,7 +67,7 @@ func (propertiesHandler) CheckLiteral(span Span, value string) error {
 // "\r\n". A line whose first non-whitespace character is '#' or '!' is a
 // comment and never continues. Any other line ending in an odd number of
 // backslashes continues onto the next one; such an entry is recorded for
-// duplicate detection but marked multiline (AC-5.13, AC-5.18).
+// duplicate detection but marked multiline (AC-5.13, AC-5.20).
 func scanProperties(src []byte) ([]entry, error) {
 	lines := splitLines(src, true)
 
@@ -167,7 +167,7 @@ func splitPropertiesEntry(text []byte) (keyEnd, valueStart int, explicit bool) {
 
 // unescapeProperties resolves a key's escapes as Java does: \t \n \r \f,
 // \uXXXX, and a backslash before any other character yields that
-// character (AC-5.29).
+// character (AC-5.31).
 func unescapeProperties(raw []byte) (string, error) {
 	out := make([]byte, 0, len(raw))
 	for i := 0; i < len(raw); i++ {

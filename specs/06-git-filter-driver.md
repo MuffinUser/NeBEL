@@ -88,7 +88,7 @@ See REQUIREMENTS.md § Git integration, § Bootstrapping & no-key operation.
   fields span several versions decrypts correctly as long as the keyring
   holds all of them.
 - **AC-6.14 Line formats through the filter**: for a `mode: value` rule
-  matching a `.env` or `.properties` file (spec 05 AC-5.14), AC-6.2
+  matching a `.env` or `.properties` file (spec 05 AC-5.16), AC-6.2
   through AC-6.13 hold unchanged. The AAD field component is the
   configured literal key, e.g. `siv.AAD(ModeValue, "prod.env",
   "DATABASE_PASSWORD")`. The plaintext encrypted is the raw literal
@@ -98,5 +98,5 @@ See REQUIREMENTS.md § Git integration, § Bootstrapping & no-key operation.
   land silently.
 - **AC-6.15 Smudge context guard**: smudge of a line-based format rejects
   a decrypted value that isn't valid in its current quote context, or that
-  contains `\n`/`\r` (spec 05 AC-5.23), with an error naming file and
+  contains `\n`/`\r` (spec 05 AC-5.25), with an error naming file and
   key, handled the same way as a tampered tag under AC-6.9.

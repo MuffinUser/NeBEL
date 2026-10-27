@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// AC-5.15, AC-5.16: lines carry real offsets into the source, terminators
+// AC-5.17, AC-5.18: lines carry real offsets into the source, terminators
 // excluded, a BOM is skipped, and a lone "\r" ends a line only when asked.
 func TestSplitLines(t *testing.T) {
 	for _, tt := range []struct {

@@ -734,7 +734,7 @@ func TestHandlerRoundTrip(t *testing.T) {
 	}
 }
 
-// AC-5.14: the format comes from the base name, so the common
+// AC-5.16: the format comes from the base name, so the common
 // ".env.local" family is recognized even though its extension is ".local".
 func TestDetect(t *testing.T) {
 	for _, tt := range []struct {

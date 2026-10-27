@@ -30,7 +30,7 @@ line two"
 DOTTED.KEY=dots-are-literal
 `
 
-// AC-5.9, AC-5.10, AC-5.20, AC-5.24-5.26: each key's span covers exactly
+// AC-5.9, AC-5.10, AC-5.22, AC-5.26-5.28: each key's span covers exactly
 // the raw literal, quotes and comments outside it.
 func TestEnvLocate(t *testing.T) {
 	h, err := For("prod.env")
@@ -132,7 +132,7 @@ func TestEnvSpliceRoundTrip(t *testing.T) {
 	}
 }
 
-// AC-5.17, AC-5.18, AC-5.19, AC-5.27: refusals.
+// AC-5.19, AC-5.20, AC-5.21, AC-5.29: refusals.
 func TestEnvLocateErrors(t *testing.T) {
 	for _, tt := range []struct {
 		name, src, key string
@@ -158,7 +158,7 @@ func TestEnvLocateErrors(t *testing.T) {
 	}
 }
 
-// AC-5.18: a line inside a multi-line value is never read as an entry,
+// AC-5.20: a line inside a multi-line value is never read as an entry,
 // so it can't shadow or duplicate a real key.
 func TestEnvMultilineInnerLinesAreNotEntries(t *testing.T) {
 	src := "KEY=\"-----BEGIN-----\nPASSWORD=inner\n-----END-----\"\nPASSWORD=outer\n"
@@ -172,7 +172,7 @@ func TestEnvMultilineInnerLinesAreNotEntries(t *testing.T) {
 	}
 }
 
-// AC-5.16: a BOM is not part of the first key, and survives.
+// AC-5.18: a BOM is not part of the first key, and survives.
 func TestEnvBOM(t *testing.T) {
 	src := "\xEF\xBB\xBFA=1\n"
 	h, _ := For(".env")
@@ -185,7 +185,7 @@ func TestEnvBOM(t *testing.T) {
 	}
 }
 
-// AC-5.22: Leaves lists locatable entries only, in source order.
+// AC-5.24: Leaves lists locatable entries only, in source order.
 func TestEnvLeaves(t *testing.T) {
 	src := "A=1\nB=2\nB=3\nC=\"x\ny\"\nD='four'\n"
 	h, _ := For(".env.local")
@@ -202,7 +202,7 @@ func TestEnvLeaves(t *testing.T) {
 	}
 }
 
-// AC-5.23: a literal that doesn't fit the quoting its tag now sits in is
+// AC-5.25: a literal that doesn't fit the quoting its tag now sits in is
 // refused instead of being written out as a different value.
 func TestEnvCheckLiteral(t *testing.T) {
 	h, _ := For("prod.env")

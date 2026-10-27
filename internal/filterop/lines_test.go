@@ -172,7 +172,7 @@ func TestLineFormatsSmudgeRejectsLineBreak(t *testing.T) {
 	}
 }
 
-// Duplicates and multi-line values fail clean (spec 05 AC-5.17, 5.18)
+// Duplicates and multi-line values fail clean (spec 05 AC-5.19, 5.20)
 // rather than leaving the effective value in plaintext.
 func TestLineFormatsCleanRefusals(t *testing.T) {
 	for name, tt := range map[string]struct {

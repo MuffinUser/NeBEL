@@ -44,20 +44,20 @@ var (
 	// ErrDuplicateKey is returned when a configured key occurs more than
 	// once in a .env or .properties file. Both formats let the last
 	// occurrence win at runtime, so encrypting any single one could leave
-	// the effective value in plaintext (spec 05 AC-5.17).
+	// the effective value in plaintext (spec 05 AC-5.19).
 	ErrDuplicateKey = errors.New("format: key occurs more than once")
 
 	// ErrMultiline is returned when a configured key's value spans more
-	// than one line, which line-based formats don't encrypt (AC-5.18).
+	// than one line, which line-based formats don't encrypt (AC-5.20).
 	ErrMultiline = errors.New("format: value spans several lines; use mode: file for it")
 
 	// ErrMalformed is returned for a line a line-based handler can't
-	// parse. Skipping it instead could hide a key (AC-5.19).
+	// parse. Skipping it instead could hide a key (AC-5.21).
 	ErrMalformed = errors.New("format: malformed line")
 
 	// ErrLiteralContext is returned when a decrypted value can't be
 	// written back where its tag now sits, e.g. because the quotes around
-	// the tag changed after it was encrypted (AC-5.23).
+	// the tag changed after it was encrypted (AC-5.25).
 	ErrLiteralContext = errors.New("format: decrypted value does not fit its surrounding quotes")
 )
 
@@ -145,7 +145,7 @@ type Handler interface {
 	// span unchanged. Line-based formats render verbatim, and their
 	// quotes aren't covered by the ciphertext's authentication, so a
 	// value can come back into a context it was never valid in (spec 05
-	// AC-5.23). YAML and JSON always accept: Render escapes for them.
+	// AC-5.25). YAML and JSON always accept: Render escapes for them.
 	CheckLiteral(span Span, value string) error
 }
 
@@ -177,7 +177,7 @@ func (k Kind) LineBased() bool {
 }
 
 // Detect returns the format of a file from its base name (spec 05
-// AC-5.14). A known extension wins; otherwise ".env" and ".env.*" are
+// AC-5.16). A known extension wins; otherwise ".env" and ".env.*" are
 // dotenv files, since ".env.local"'s extension is ".local". name may also
 // be a glob's last segment ("*.env", ".env.*"), which is how config
 // validation picks a key syntax before any file is matched.

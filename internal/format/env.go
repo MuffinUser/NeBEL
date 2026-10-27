@@ -36,7 +36,7 @@ func (envHandler) Leaves(src []byte) ([]Leaf, error) {
 	return entryLeaves(entries), nil
 }
 
-// Render returns value verbatim: quotes live outside the span (AC-5.21).
+// Render returns value verbatim: quotes live outside the span (AC-5.23).
 // It never fails; CheckLiteral is what rejects a value that doesn't fit.
 func (envHandler) Render(value string, _ tag.Type) (string, error) { return value, nil }
 
@@ -45,7 +45,7 @@ func (envHandler) Render(value string, _ tag.Type) (string, error) { return valu
 func (envHandler) RoundTrip(_ string, t tag.Type) error { return lineTypeRoundTrip(t) }
 
 // CheckLiteral rejects a value that would read back differently in the
-// quoting its tag now sits in (AC-5.23).
+// quoting its tag now sits in (AC-5.25).
 func (envHandler) CheckLiteral(span Span, value string) error {
 	if err := checkNoLineBreak(value); err != nil {
 		return err
@@ -99,8 +99,8 @@ func (envHandler) CheckLiteral(span Span, value string) error {
 //	unquoted := to end of line, stopping before WS+ "#"; trailing WS excluded
 //
 // A quoted value may close on a later line; that entry is marked
-// multiline and its inner lines are never read as entries (AC-5.18).
-// Anything else fails closed with ErrMalformed (AC-5.19).
+// multiline and its inner lines are never read as entries (AC-5.20).
+// Anything else fails closed with ErrMalformed (AC-5.21).
 func scanEnv(src []byte) ([]entry, error) {
 	lines := splitLines(src, false)
 	for i, ln := range lines {
@@ -118,7 +118,7 @@ func scanEnv(src []byte) ([]entry, error) {
 		}
 
 		// "export" is a prefix only when whitespace follows it, so
-		// "export=foo" stays an entry keyed "export" (AC-5.24).
+		// "export=foo" stays an entry keyed "export" (AC-5.26).
 		if rest := src[p:ln.end]; bytes.HasPrefix(rest, []byte("export")) && len(rest) > 6 && isBlank(rest[6]) {
 			p = skipBlanks(src, p+6, ln.end)
 		}
@@ -174,7 +174,7 @@ func scanEnv(src []byte) ([]entry, error) {
 			if end == v {
 				// An empty value sits directly after "=", so in
 				// `KEY= # note` the tag lands before the whitespace and
-				// the comment stays a comment (AC-5.20).
+				// the comment stays a comment (AC-5.22).
 				start, end, ctx = eq, eq, ctxEnvBare
 			}
 			e.span = Span{Start: start, End: end, Value: string(src[start:end]), Type: tag.TypeStr, ctx: ctx}

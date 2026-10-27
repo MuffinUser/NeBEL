@@ -43,7 +43,7 @@ USER_INTERACTIONS.md § init / add.
   (spec 07) always sets `key_version: 1`.
 - **AC-4.11 Format-aware field validation**: `Validate` checks each
   `encrypt` entry against the format of its rule's `files` glob, detected
-  by applying spec 05 AC-5.14 to the glob's last path segment (`*.env` →
+  by applying spec 05 AC-5.16 to the glob's last path segment (`*.env` →
   env, `config/*.properties` → properties, `**/*.yaml` → YAML,
   `.env.*` → env).
   - YAML/JSON: the entry must parse with `format.ParsePath` (as today).

@@ -58,8 +58,8 @@ diff. A bare `add <glob>` names neither and is refused with usage.
   that this only protects future commits: content already committed in
   plaintext is still recoverable from history.
 - **AC-8.12 Line formats**: `add field` works for `.env` and
-  `.properties` files (spec 05 AC-5.14), with paths being literal keys.
-  The picker (AC-8.7) lists entries via `Leaves` (spec 05 AC-5.22), so
+  `.properties` files (spec 05 AC-5.16), with paths being literal keys.
+  The picker (AC-8.7) lists entries via `Leaves` (spec 05 AC-5.24), so
   duplicated keys and multi-line values aren't offered. A named path that
   is duplicated or multi-line is refused under AC-8.4 with the handler's
   error (`ErrDuplicateKey` / `ErrMultiline`).

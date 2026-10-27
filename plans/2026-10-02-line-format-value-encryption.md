@@ -1,8 +1,8 @@
 # Plan — field-level encryption for `.env` and `.properties`
 
 Branch: `feature/line-format-value-encryption`
-Specs: 05 § Line-based formats (AC-5.9–5.30), 04 AC-4.11, 06 AC-6.14–6.15,
-08 AC-8.11.
+Specs: 05 § Line-based formats (AC-5.9–5.32), 04 AC-4.11, 06 AC-6.14–6.15,
+08 AC-8.12.
 
 ## Decisions (agreed 2026-10-02)
 
@@ -23,7 +23,7 @@ Specs: 05 § Line-based formats (AC-5.9–5.30), 04 AC-4.11, 06 AC-6.14–6.15,
    keys such as `a..b` or `foo[`, which contradicts REQUIREMENTS § Value
    selection. → AC-4.11.
 2. **Format detection** (`format.For`) uses `filepath.Ext`. `.env.local`
-   resolves to `.local` and is rejected. → AC-5.14.
+   resolves to `.local` and is rejected. → AC-5.16.
 3. **Type preservation** (REQUIREMENTS, AC-3.2) doesn't apply: these
    formats have no types, so it's always `str`. Clarified in REQUIREMENTS.
 4. **`Span.Value` doc** says "quotes removed, escapes resolved". For line
@@ -40,7 +40,7 @@ Specs: 05 § Line-based formats (AC-5.9–5.30), 04 AC-4.11, 06 AC-6.14–6.15,
 
 1. **Format detection** — `internal/format/format.go`
    - Add `Detect(name string) (Kind, bool)` working on a base name
-     (AC-5.14). `For` uses it; config can reuse it on a glob's last segment.
+     (AC-5.16). `For` uses it; config can reuse it on a glob's last segment.
    - Tests: name table (`.env`, `.env.local`, `prod.env`, `.env.json`,
      `app.properties`, `env`, `x.envrc`).
 2. **Config validation** — `internal/config/config.go`
@@ -51,21 +51,21 @@ Specs: 05 § Line-based formats (AC-5.9–5.30), 04 AC-4.11, 06 AC-6.14–6.15,
      uses `ParsePath`.
 3. **Shared line tokenizer** — `internal/format/lines.go`
    - Splits into logical lines with real byte offsets, `\r` excluded,
-     BOM skipped, lone `\r` per format (AC-5.15, 5.16). Shared duplicate-key and multi-line
-     bookkeeping (AC-5.17, 5.18). Errors `ErrDuplicateKey`,
+     BOM skipped, lone `\r` per format (AC-5.17, 5.18). Shared duplicate-key and multi-line
+     bookkeeping (AC-5.19, 5.20). Errors `ErrDuplicateKey`,
      `ErrMultiline`, `ErrMalformed` with line numbers.
 4. **`.env` handler** — `internal/format/env.go`
    - Grammar per spec 05 § `.env`: export, quotes, `\"`, inline comments,
      spaces around `=`, empty values, unterminated quotes (AC-5.9, 5.10,
-     5.19–5.22, 5.24–5.27).
+     5.21–5.24, 5.26–5.29).
    - Tests: AC-5.1 byte-exactness over a fixture with every construct,
      plus LF and CRLF variants.
 5. **`.properties` handler** — `internal/format/properties.go`
    - `=`/`:`/whitespace separators, `#`/`!` comments, continuation
      detection, logical-key unescaping incl. `\uXXXX`, trailing whitespace
-     kept in values (AC-5.11–5.13, 5.28–5.30).
+     kept in values (AC-5.11–5.13, 5.30–5.32).
 6. **Filter integration** — `internal/filterop/filterop.go`
-   - Smudge context guard for line formats (AC-5.23, AC-6.15). Everything else
+   - Smudge context guard for line formats (AC-5.25, AC-6.15). Everything else
      should already work through the `Handler` interface. Update the
      `Span.Value` doc comment.
    - Tests: clean→smudge round trip (AC-6.5), idempotence (AC-6.3),
@@ -73,7 +73,7 @@ Specs: 05 § Line-based formats (AC-5.9–5.30), 04 AC-4.11, 06 AC-6.14–6.15,
      `.env` and one `.properties` value in `golden_test.go` (AC-6.14).
 7. **CLI** — `cmd/nebel`
    - `add field` e2e for both formats, incl. the picker and refusal of
-     duplicate/multi-line keys (AC-8.11). `undecrypted.go` and rotate get
+     duplicate/multi-line keys (AC-8.12). `undecrypted.go` and rotate get
      the formats for free via `format.For`; add one rotate e2e on a `.env`
      to prove it.
 8. **Docs** — README format table and examples, plus the `**/*.env` glob

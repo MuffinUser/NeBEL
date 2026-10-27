@@ -82,9 +82,9 @@ func ParsePath(path string) ([]Step, error) {
 }
 
 // ValidKey checks that key is a well-formed encrypt entry for format k
-// (spec 04 AC-4.11). YAML, JSON and an undetected format (k == "") take
-// dot notation; .env and .properties take a literal key, so "a..b" or
-// "foo[" are valid there even though ParsePath would reject them.
+// (spec 04 AC-4.11). YAML and JSON take dot notation; .env and
+// .properties take a literal key, so "a..b" or "foo[" are valid there even
+// though ParsePath would reject them.
 func ValidKey(k Kind, key string) error {
 	if !k.LineBased() {
 		_, err := ParsePath(key)

@@ -138,14 +138,16 @@ func (c *Config) Validate() error {
 			}
 			// The key syntax depends on the format, which a glob only
 			// reveals through its last segment ("*.env", "**/*.properties").
-			// A glob that doesn't name one gets dot notation, so a typo in
-			// an existing YAML/JSON rule still fails here (AC-4.11).
+			// A glob that doesn't name one ("config/*", "**/*.{env,yaml}")
+			// may match several formats, so it gets the loosest check, the
+			// .properties literal key; Locate still rejects a key that's
+			// invalid for the file actually matched (AC-4.11).
 			kind, detected := format.Detect(path.Base(r.Files))
+			if !detected {
+				kind = format.KindProperties
+			}
 			for _, field := range r.Encrypt {
 				if err := format.ValidKey(kind, field); err != nil {
-					if !detected {
-						return fmt.Errorf("config: rule %q: %w (for a literal .env/.properties key, use a glob ending in .env or .properties)", r.Files, err)
-					}
 					return fmt.Errorf("config: rule %q: %w", r.Files, err)
 				}
 			}

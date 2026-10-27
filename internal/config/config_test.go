@@ -250,7 +250,7 @@ func writeTempConfig(t *testing.T, contents string) string {
 
 // AC-4.11: an encrypt entry is checked with the key syntax of the format
 // its rule's glob names. Literal .env/.properties keys that aren't valid
-// dot notation must load; a glob naming no format keeps dot notation.
+// dot notation must load, also under a glob naming no single format.
 func TestLoadValidatesKeysByFormat(t *testing.T) {
 	for _, tt := range []struct {
 		name, files, key string
@@ -267,7 +267,11 @@ func TestLoadValidatesKeysByFormat(t *testing.T) {
 		{"yaml dot path", "**/*.yaml", "database.password", true},
 		{"yaml bad path", "**/*.yaml", "a..b", false},
 		{"unknown glob dot path", "config/*", "database.password", true},
-		{"unknown glob bad path", "config/*", "api.keys[", false},
+		{"unknown glob literal key", "config/*", "a..b", true},
+		{"brace glob literal key", "**/*.{env,properties}", "FOO[", true},
+		{"prefix glob literal key", ".env*", "a..b", true},
+		{"unknown glob control char", "config/*", "a\tb", false},
+		{"unknown glob empty", "config/*", "", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{Rules: []Rule{{Files: tt.files, Mode: ModeValue, Encrypt: []string{tt.key}}}}

@@ -51,11 +51,13 @@ USER_INTERACTIONS.md § init / add.
     contain no control characters. For env it must also contain no
     whitespace and no `=`. So `a..b`, `.x` and `foo[` are valid
     properties keys and must load.
-  - Undetectable (e.g. `config/*`, `**/*`): `ParsePath`, as today. That
-    keeps a typo like `api.keys[` failing at load for existing YAML/JSON
-    repos. The trade-off: a line-format key that isn't valid dot notation
-    needs a glob whose format can be detected (`*.properties`, `.env.*`).
-    The load error says so.
+  - Undetectable (e.g. `config/*`, `.env*`, `**/*.{env,properties}`):
+    such a glob may match several formats, so the entry gets the loosest
+    check, the properties literal key. A typo like `api.keys[` in a YAML
+    rule then loads, but still fails with `ErrBadPath` when a matched YAML
+    file is staged, and `nebel add field` checks entries against the real
+    file. Requiring dot notation here instead would reject valid literal
+    keys under globs that can't name a single format.
 
   This removes a conflict with REQUIREMENTS.md § Value selection: today
   every entry goes through `ParsePath`, which rejects legal literal keys.

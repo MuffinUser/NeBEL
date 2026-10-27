@@ -264,3 +264,18 @@ func TestPropertiesKeySpellings(t *testing.T) {
 		t.Errorf("Leaves = %+v, %v; want two distinct keys", leaves, err)
 	}
 }
+
+// AC-5.34: whitespace after a tag would be part of the value, so the tag
+// couldn't be read back. It's refused with a clear error on both clean and
+// smudge, instead of a malformed-tag error or a tag encrypted as text.
+func TestPropertiesWhitespaceAfterTag(t *testing.T) {
+	h, _ := For("app.properties")
+	tagged := "ENC[AES256_SIV_TB,key:1,data:" + strings.Repeat("A", 44) + ",type:str]"
+	_, err := h.Locate([]byte("pw="+tagged+"  \n"), "pw")
+	if !errors.Is(err, ErrMalformed) || !strings.Contains(err.Error(), "whitespace after") {
+		t.Errorf("Locate error = %v, want %v about trailing whitespace", err, ErrMalformed)
+	}
+	if _, err := h.Locate([]byte("pw=secret  \n"), "pw"); err != nil {
+		t.Errorf("trailing whitespace on a plaintext value: %v", err)
+	}
+}

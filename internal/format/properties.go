@@ -4,6 +4,7 @@
 package format
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"unicode/utf16"
@@ -112,6 +113,13 @@ func scanProperties(src []byte) ([]entry, error) {
 			}
 			start, end := offset+valueStart, ln.end
 			e.span = Span{Start: start, End: end, Value: string(src[start:end]), Type: tag.TypeStr, ctx: ctx}
+			// Trailing whitespace is part of a .properties value, so
+			// after a tag it would make the tag unreadable: smudge
+			// couldn't parse it, and clean would encrypt the tag text
+			// itself (AC-5.34).
+			if trimmed := bytes.TrimRight(src[start:end], " \t\f"); len(trimmed) < end-start && tag.LooksEncrypted(trimmed) {
+				e.refuse = malformed(n, "whitespace after the ENC[...] tag of %q; remove it", e.key)
+			}
 		}
 		entries = append(entries, e)
 		i = j

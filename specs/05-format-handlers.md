@@ -278,3 +278,10 @@ ever decoded.
 - **AC-5.32 Escapes in values stay raw**: `\uXXXX` and other escapes in a
   value are part of the encrypted raw literal and come back unchanged on
   smudge.
+- **AC-5.34 No whitespace after a tag**: trailing whitespace is part of a
+  `.properties` value, so in `key=ENC[...]  ` the tag can't be read back:
+  smudge would fail to parse it, and clean would encrypt the tag text as
+  if it were plaintext. `Locate` refuses such an entry with
+  `ErrMalformed` asking to remove the whitespace, on clean and smudge
+  alike. Whitespace after a plaintext value is kept and encrypted as
+  usual.

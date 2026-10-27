@@ -212,3 +212,55 @@ func TestPropertiesCheckLiteral(t *testing.T) {
 		})
 	}
 }
+
+// AC-5.19: Java reads a key under the file's charset with escapes
+// resolved, so spellings that differ in bytes can be one key at runtime.
+// Each is a duplicate of the other, or the effective value could stay in
+// plaintext.
+func TestPropertiesCharsetAndEscapeDuplicates(t *testing.T) {
+	for _, tt := range []struct {
+		name, src, key string
+	}{
+		{"escape vs ISO-8859-1 byte", "p\\u00e4ss=one\np\xe4ss=two\n", "päss"},
+		{"escape vs UTF-8 bytes", "p\\u00e4ss=one\npäss=two\n", "päss"},
+		{"surrogate pair vs UTF-8 bytes", "\\uD83D\\uDE00=one\n😀=two\n", "😀"},
+		{"escaped vs plain ASCII", "my\\ key=one\nmy\\u0020key=two\n", "my key"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, _ := For("app.properties")
+			if _, err := h.Locate([]byte(tt.src), tt.key); !errors.Is(err, ErrDuplicateKey) {
+				t.Errorf("Locate(%q) error = %v, want %v", tt.key, err, ErrDuplicateKey)
+			}
+			if leaves, _ := h.Leaves([]byte(tt.src)); len(leaves) != 0 {
+				t.Errorf("Leaves = %+v, want none", leaves)
+			}
+		})
+	}
+}
+
+// AC-5.31: a key is found under the spelling Java reads, whatever the
+// file's charset, and distinct keys stay distinct.
+func TestPropertiesKeySpellings(t *testing.T) {
+	h, _ := For("app.properties")
+	for _, tt := range []struct {
+		name, src, key string
+	}{
+		{"ISO-8859-1 byte", "p\xe4ss=one\n", "päss"},
+		{"UTF-8 bytes", "päss=one\n", "päss"},
+		{"surrogate pair escape", "\\uD83D\\uDE00=one\n", "😀"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			span, err := h.Locate([]byte(tt.src), tt.key)
+			if err != nil || span.Value != "one" {
+				t.Errorf("Locate(%q) = %q, %v; want \"one\"", tt.key, span.Value, err)
+			}
+		})
+	}
+
+	// Different lone surrogates aren't both U+FFFD, so they aren't
+	// mistaken for duplicates.
+	leaves, err := h.Leaves([]byte("\\uD800=one\n\\uD801=two\n"))
+	if err != nil || len(leaves) != 2 {
+		t.Errorf("Leaves = %+v, %v; want two distinct keys", leaves, err)
+	}
+}

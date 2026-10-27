@@ -131,13 +131,32 @@ properties library reports byte offsets, and AC-5.1 needs offsets.
   Both formats use the *last* occurrence at runtime, so encrypting any one
   occurrence could leave the effective value in plaintext. Duplicates of
   keys *not* configured are ignored.
+
+  "The same key" means any spelling the application could read as one,
+  not equal bytes. For `.env`, keys differing only in case are duplicates,
+  since environment variables are case-insensitive on Windows. For
+  `.properties`, a key is read under both charsets Java uses (ISO-8859-1
+  for `load(InputStream)`, UTF-8 for a typical `Reader`) with escapes
+  resolved (AC-5.31), and two entries reading the same under either
+  charset are duplicates: `p\u00e4ss` and an ISO-8859-1 `päss` byte.
+  The error names every spelling found. The picker (AC-5.24) omits every
+  entry that has such a duplicate, configured or not.
 - **AC-5.20 Multi-line values: tokenized, never located**: the tokenizer
   recognizes multi-line constructs (`.properties` continuation lines, a
   `.env` quoted value whose closing quote is on a later line). That way it
   never misreads a continuation line such as `  password=x` as a key of
   its own. `Locate` on a configured key whose value spans more than one
   line fails with `ErrMultiline`; the error suggests `mode: file` for
-  values like PEM keys. This resolves AC-5.13. Support can be added later
+  values like PEM keys.
+
+  A `.env` reader without multi-line quotes does read a `KEY=` line
+  inside another value's quotes as an entry, and that later value would
+  win over an encrypted one. Such a line therefore counts for duplicate
+  detection (AC-5.19), and a configured key found *only* there is
+  `ErrMultiline`, naming the line the quoted value starts on. Inner lines
+  that don't read as `KEY=` (a PEM body) are ignored. `.properties`
+  continuation is the same in every Java reader, so it needs no such
+  rule. This resolves AC-5.13. Support can be added later
   without a format break, because no such tag can exist yet.
 - **AC-5.21 Malformed line rejected**: a line that is neither blank, a
   comment, nor a key/value entry fails `Locate` and `Leaves` with
@@ -248,8 +267,14 @@ ever decoded.
   compared with the key as Java would read it, with `\ `, `\:`, `\=`,
   `\\`, `\t`/`\n`/… and `\uXXXX` escapes resolved. So `my\ key` is matched
   by the configured key `my key`. Duplicate detection (AC-5.19) uses the
-  same logical key, so `ab` and `ab` count as the same key. Only the
+  same logical key, so `a\b` and `ab` count as the same key. Only the
   *value* is raw-literal; the key itself is never rewritten.
+
+  Non-ASCII bytes in a key are read as UTF-8 (when valid) and as
+  ISO-8859-1, and the configured key matches either. `\uXXXX` escapes are
+  UTF-16 code units as in Java, so a surrogate pair is one character
+  (`\uD83D\uDE00` matches `😀`); a lone surrogate stays its own code
+  point rather than U+FFFD, so two different ones aren't one key.
 - **AC-5.32 Escapes in values stay raw**: `\uXXXX` and other escapes in a
   value are part of the encrypted raw literal and come back unchanged on
   smudge.

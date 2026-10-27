@@ -5,6 +5,7 @@ package format
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -99,7 +100,8 @@ func (envHandler) CheckLiteral(span Span, value string) error {
 //	unquoted := to end of line, stopping before WS+ "#"; trailing WS excluded
 //
 // A quoted value may close on a later line; that entry is marked
-// multiline and its inner lines are never read as entries (AC-5.20).
+// multiline, and KEY= lines inside it are recorded only as hidden
+// entries for duplicate detection (AC-5.20).
 // Anything else fails closed with ErrMalformed (AC-5.21).
 func scanEnv(src []byte) ([]entry, error) {
 	lines := splitLines(src, false)
@@ -117,28 +119,13 @@ func scanEnv(src []byte) ([]entry, error) {
 			continue
 		}
 
-		// "export" is a prefix only when whitespace follows it, so
-		// "export=foo" stays an entry keyed "export" (AC-5.26).
-		if rest := src[p:ln.end]; bytes.HasPrefix(rest, []byte("export")) && len(rest) > 6 && isBlank(rest[6]) {
-			p = skipBlanks(src, p+6, ln.end)
+		key, eq, err := envKey(src, p, ln.end)
+		if err != nil {
+			return nil, malformed(n, "%v", err)
 		}
-
-		k := p
-		for k < ln.end && !isBlank(src[k]) && src[k] != '=' {
-			k++
-		}
-		if k == p {
-			return nil, malformed(n, "expected KEY=value")
-		}
-		key := string(src[p:k])
-		q := skipBlanks(src, k, ln.end)
-		if q == ln.end || src[q] != '=' {
-			return nil, malformed(n, "expected \"=\" after %q", key)
-		}
-		eq := q + 1
 		v := skipBlanks(src, eq, ln.end)
 
-		e := entry{key: key, line: n}
+		e := envEntry(key, n)
 		if v < ln.end && (src[v] == '\'' || src[v] == '"') {
 			quote := src[v]
 			closing := findClosingQuote(src, v+1, quote)
@@ -158,30 +145,75 @@ func scanEnv(src []byte) ([]entry, error) {
 			}
 			e.multiline = j > i
 			e.span = Span{Start: v + 1, End: closing, Value: string(src[v+1 : closing]), Type: tag.TypeStr, ctx: ctx}
+			entries = append(entries, e)
+			// Lines inside the quotes aren't entries here, but a reader
+			// without multi-line quotes takes a KEY= line for one, and
+			// a secret there would win over the encrypted one (AC-5.20).
+			for k := i + 1; k <= j; k++ {
+				p := skipBlanks(src, lines[k].start, lines[k].end)
+				if key, _, err := envKey(src, p, lines[k].end); err == nil {
+					hidden := envEntry(key, k+1)
+					hidden.hiddenIn = n
+					entries = append(entries, hidden)
+				}
+			}
 			i = j
-		} else {
-			end := v
-			for end < ln.end && !(src[end] == '#' && end > eq && isBlank(src[end-1])) {
-				end++
-			}
-			for end > v && isBlank(src[end-1]) {
-				end--
-			}
-			start, ctx := v, ctxEnvBare
-			if v > eq {
-				ctx = ctxEnvBareSpaced
-			}
-			if end == v {
-				// An empty value sits directly after "=", so in
-				// `KEY= # note` the tag lands before the whitespace and
-				// the comment stays a comment (AC-5.22).
-				start, end, ctx = eq, eq, ctxEnvBare
-			}
-			e.span = Span{Start: start, End: end, Value: string(src[start:end]), Type: tag.TypeStr, ctx: ctx}
+			continue
 		}
+
+		end := v
+		for end < ln.end && !(src[end] == '#' && end > eq && isBlank(src[end-1])) {
+			end++
+		}
+		for end > v && isBlank(src[end-1]) {
+			end--
+		}
+		start, ctx := v, ctxEnvBare
+		if v > eq {
+			ctx = ctxEnvBareSpaced
+		}
+		if end == v {
+			// An empty value sits directly after "=", so in
+			// `KEY= # note` the tag lands before the whitespace and
+			// the comment stays a comment (AC-5.22).
+			start, end, ctx = eq, eq, ctxEnvBare
+		}
+		e.span = Span{Start: start, End: end, Value: string(src[start:end]), Type: tag.TypeStr, ctx: ctx}
 		entries = append(entries, e)
 	}
 	return entries, nil
+}
+
+// envKey reads `["export" WS+] KEY WS* "="` starting at p and returns
+// the key and the offset just past the "=".
+func envKey(src []byte, p, end int) (string, int, error) {
+	// "export" is a prefix only when whitespace follows it, so
+	// "export=foo" stays an entry keyed "export" (AC-5.26).
+	if rest := src[p:end]; bytes.HasPrefix(rest, []byte("export")) && len(rest) > 6 && isBlank(rest[6]) {
+		p = skipBlanks(src, p+6, end)
+	}
+
+	k := p
+	for k < end && !isBlank(src[k]) && src[k] != '=' {
+		k++
+	}
+	if k == p {
+		return "", 0, errors.New("expected KEY=value")
+	}
+	key := string(src[p:k])
+	q := skipBlanks(src, k, end)
+	if q == end || src[q] != '=' {
+		return "", 0, fmt.Errorf("expected \"=\" after %q", key)
+	}
+	return key, q + 1, nil
+}
+
+// envEntry starts the entry for key on line n. Environment variable names
+// are case-insensitive on Windows, so "SECRET" and "secret" share an
+// alias: loaded there, the later one silently replaces the earlier
+// (AC-5.19).
+func envEntry(key string, n int) entry {
+	return entry{key: key, keys: []string{key}, aliases: []string{"env:" + strings.ToUpper(key)}, line: n}
 }
 
 // findClosingQuote returns the offset of the quote closing a value that

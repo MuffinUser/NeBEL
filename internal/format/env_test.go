@@ -158,17 +158,42 @@ func TestEnvLocateErrors(t *testing.T) {
 	}
 }
 
-// AC-5.20: a line inside a multi-line value is never read as an entry,
-// so it can't shadow or duplicate a real key.
-func TestEnvMultilineInnerLinesAreNotEntries(t *testing.T) {
-	src := "KEY=\"-----BEGIN-----\nPASSWORD=inner\n-----END-----\"\nPASSWORD=outer\n"
-	h, _ := For("prod.env")
-	span, err := h.Locate([]byte(src), "PASSWORD")
-	if err != nil {
-		t.Fatalf("Locate: %v", err)
+// AC-5.20: a KEY= line inside a multi-line quoted value isn't an entry
+// here, but a reader without multi-line quotes takes it for one, and its
+// value would win over the encrypted one. So it counts as a duplicate,
+// and a key found only there can't be located. Other inner lines, like a
+// PEM body, are ignored.
+func TestEnvMultilineInnerLines(t *testing.T) {
+	for _, tt := range []struct {
+		name, src, key string
+		want           error
+	}{
+		{"hidden after real", "PASSWORD=outer\nKEY='\nPASSWORD=inner\n'\n", "PASSWORD", ErrDuplicateKey},
+		{"hidden before real", "KEY=\"-----BEGIN-----\nexport PASSWORD=inner\n-----END-----\"\nPASSWORD=outer\n", "PASSWORD", ErrDuplicateKey},
+		{"only hidden", "KEY=\"\nPASSWORD=inner\n\"\n", "PASSWORD", ErrMultiline},
+		{"PEM body ignored", "KEY=\"-----BEGIN-----\nMIIBIjAN BgkqhkiG9w0BAQ==\n-----END-----\"\nPASSWORD=outer\n", "PASSWORD", nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, _ := For("prod.env")
+			if _, err := h.Locate([]byte(tt.src), tt.key); !errors.Is(err, tt.want) {
+				t.Errorf("Locate(%q) error = %v, want %v", tt.key, err, tt.want)
+			}
+		})
 	}
-	if span.Value != "outer" {
-		t.Errorf("Value = %q, want %q", span.Value, "outer")
+}
+
+// AC-5.19: environment variable names are case-insensitive on Windows, so
+// keys differing only in case are duplicates, and the picker skips both.
+func TestEnvCaseInsensitiveDuplicates(t *testing.T) {
+	src := []byte("SECRET=a\nsecret=b\nOTHER=c\n")
+	h, _ := For(".env")
+	_, err := h.Locate(src, "SECRET")
+	if !errors.Is(err, ErrDuplicateKey) || !strings.Contains(err.Error(), `"SECRET", "secret"`) {
+		t.Errorf("Locate error = %v, want %v naming both spellings", err, ErrDuplicateKey)
+	}
+	leaves, err := h.Leaves(src)
+	if err != nil || len(leaves) != 1 || leaves[0].Path != "OTHER" {
+		t.Errorf("Leaves = %+v, %v; want only OTHER", leaves, err)
 	}
 }
 

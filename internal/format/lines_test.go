@@ -53,14 +53,19 @@ func TestOddTrailingBackslashes(t *testing.T) {
 // Shared bookkeeping for both line formats: a duplicate, a multi-line
 // value and a key-only line each refuse to locate, and Leaves omits them.
 func TestLocateEntryRefusals(t *testing.T) {
-	entries := []entry{
-		{key: "ok", line: 1, span: Span{Value: "v"}},
-		{key: "dup", line: 2},
-		{key: "dup", line: 5},
-		{key: "multi", line: 3, multiline: true},
-		{key: "bare", line: 4, noSeparator: true},
+	plain := func(key string, line int) entry {
+		return entry{key: key, keys: []string{key}, aliases: []string{key}, line: line}
 	}
-	for key, want := range map[string]error{"dup": ErrDuplicateKey, "multi": ErrMultiline, "bare": ErrMalformed, "missing": ErrNotFound} {
+	ok := plain("ok", 1)
+	ok.span = Span{Value: "v"}
+	multi := plain("multi", 3)
+	multi.multiline = true
+	bare := plain("bare", 4)
+	bare.refuse = malformed(4, "no separator")
+	hidden := plain("hidden", 7)
+	hidden.hiddenIn = 6
+	entries := []entry{ok, plain("dup", 2), plain("dup", 5), multi, bare, hidden}
+	for key, want := range map[string]error{"dup": ErrDuplicateKey, "multi": ErrMultiline, "hidden": ErrMultiline, "bare": ErrMalformed, "missing": ErrNotFound} {
 		if _, err := locateEntry(entries, key); !errors.Is(err, want) {
 			t.Errorf("locateEntry(%q) = %v, want %v", key, err, want)
 		}

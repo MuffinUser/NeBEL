@@ -6,6 +6,7 @@ package format
 import (
 	"fmt"
 	"strconv"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/MuffinUser/nebel/internal/tag"
@@ -15,9 +16,11 @@ import (
 // java.util.Properties.load's line syntax (spec 05 § .properties).
 //
 // Keys are matched as Java reads them, escapes resolved, so `my\ key` is
-// found by "my key". Values are the raw literal, escapes untouched: the
-// file is treated as bytes, so whether it is ISO-8859-1 or UTF-8 never
-// matters.
+// found by "my key". Values are the raw literal, escapes untouched, so the
+// file's charset doesn't matter for them. It does for keys:
+// Properties.load(InputStream) reads ISO-8859-1, a Reader-based load
+// usually UTF-8, so a key with non-ASCII bytes is read under both
+// (propertiesKey).
 type propertiesHandler struct{}
 
 func (propertiesHandler) Locate(src []byte, path string) (Span, error) {
@@ -94,12 +97,14 @@ func scanProperties(src []byte) ([]entry, error) {
 		}
 
 		keyEnd, valueStart, explicit := splitPropertiesEntry(text)
-		key, err := unescapeProperties(text[:keyEnd])
+		e, err := propertiesKey(text[:keyEnd])
 		if err != nil {
 			return nil, malformed(n, "%v", err)
 		}
-
-		e := entry{key: key, line: n, multiline: multiline, noSeparator: keyEnd == len(text)}
+		e.line, e.multiline = n, multiline
+		if keyEnd == len(text) {
+			e.refuse = malformed(n, "%q has no separator; write %q to encrypt it", e.key, e.key+"=")
+		}
 		if offset >= 0 {
 			ctx := ctxProperties
 			if !explicit {
@@ -165,14 +170,46 @@ func splitPropertiesEntry(text []byte) (keyEnd, valueStart int, explicit bool) {
 	return keyEnd, valueStart, explicit
 }
 
+// propertiesKey reads a raw key as Java would: in a UTF-8 file (when the
+// bytes are valid UTF-8) and in an ISO-8859-1 one. ASCII keys, escapes
+// included, read the same either way. A configured key matches either
+// spelling, and each is an alias under its charset, so `p\u00e4ss` and a
+// raw ISO-8859-1 "päss" are duplicates (AC-5.19).
+func propertiesKey(raw []byte) (entry, error) {
+	latin1 := make([]rune, len(raw))
+	for i, b := range raw {
+		latin1[i] = rune(b)
+	}
+	key, err := unescapeProperties(latin1)
+	if err != nil {
+		return entry{}, err
+	}
+	e := entry{key: key, keys: []string{key}, aliases: []string{"latin1:" + key}}
+	if utf8.Valid(raw) {
+		utf8Key, err := unescapeProperties([]rune(string(raw)))
+		if err != nil {
+			return entry{}, err
+		}
+		e.key = utf8Key
+		e.aliases = append(e.aliases, "utf8:"+utf8Key)
+		if utf8Key != key {
+			e.keys = []string{utf8Key, key}
+		}
+	}
+	return e, nil
+}
+
 // unescapeProperties resolves a key's escapes as Java does: \t \n \r \f,
 // \uXXXX, and a backslash before any other character yields that
-// character (AC-5.31).
-func unescapeProperties(raw []byte) (string, error) {
-	out := make([]byte, 0, len(raw))
+// character (AC-5.31). Java strings are UTF-16, so two \uXXXX escapes
+// forming a surrogate pair are one character; a lone surrogate is kept
+// as its own code point (WTF-8) rather than U+FFFD, so two different
+// ones don't read as the same key.
+func unescapeProperties(raw []rune) (string, error) {
+	var units []uint16
 	for i := 0; i < len(raw); i++ {
 		if raw[i] != '\\' {
-			out = append(out, raw[i])
+			units = utf16.AppendRune(units, raw[i])
 			continue
 		}
 		i++
@@ -181,28 +218,50 @@ func unescapeProperties(raw []byte) (string, error) {
 		}
 		switch c := raw[i]; c {
 		case 't':
-			out = append(out, '\t')
+			units = append(units, '\t')
 		case 'n':
-			out = append(out, '\n')
+			units = append(units, '\n')
 		case 'r':
-			out = append(out, '\r')
+			units = append(units, '\r')
 		case 'f':
-			out = append(out, '\f')
+			units = append(units, '\f')
 		case 'u':
 			if i+5 > len(raw) {
-				return "", fmt.Errorf("malformed \\uXXXX escape in key %q", raw)
+				return "", fmt.Errorf("malformed \\uXXXX escape in key %q", string(raw))
 			}
 			code, err := strconv.ParseUint(string(raw[i+1:i+5]), 16, 16)
 			if err != nil {
-				return "", fmt.Errorf("malformed \\uXXXX escape in key %q", raw)
+				return "", fmt.Errorf("malformed \\uXXXX escape in key %q", string(raw))
 			}
-			out = utf8.AppendRune(out, rune(code))
+			units = append(units, uint16(code))
 			i += 4
 		default:
-			out = append(out, c)
+			units = utf16.AppendRune(units, c)
 		}
 	}
-	return string(out), nil
+	return decodeUTF16(units), nil
+}
+
+// decodeUTF16 is utf16.Decode, except that a lone surrogate is encoded as
+// itself instead of being replaced by U+FFFD.
+func decodeUTF16(units []uint16) string {
+	var out []byte
+	for i := 0; i < len(units); i++ {
+		u := rune(units[i])
+		if utf16.IsSurrogate(u) && i+1 < len(units) {
+			if r := utf16.DecodeRune(u, rune(units[i+1])); r != utf8.RuneError {
+				out = utf8.AppendRune(out, r)
+				i++
+				continue
+			}
+		}
+		if utf16.IsSurrogate(u) {
+			out = append(out, byte(0xE0|u>>12), byte(0x80|(u>>6)&0x3F), byte(0x80|u&0x3F))
+			continue
+		}
+		out = utf8.AppendRune(out, u)
+	}
+	return string(out)
 }
 
 func isPropertiesSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\f' }

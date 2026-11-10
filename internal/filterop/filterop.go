@@ -12,6 +12,7 @@ package filterop
 import (
 	"errors"
 	"fmt"
+	"path"
 	"strconv"
 
 	"github.com/MuffinUser/nebel/internal/config"
@@ -185,6 +186,7 @@ func cleanValues(rule config.Rule, version int, key []byte, haveKey bool, filePa
 	if err != nil {
 		return nil, fmt.Errorf("filterop: clean %s: %w", filePath, err)
 	}
+	lineBased := isLineBased(filePath)
 
 	var edits []format.Edit
 	for _, field := range rule.Encrypt {
@@ -198,6 +200,11 @@ func cleanValues(rule config.Rule, version int, key []byte, haveKey bool, filePa
 			// merely starts with "ENC[" isn't mistaken for an
 			// already-encrypted field and left as committed plaintext —
 			// while a genuine pre-rotation tag still isn't double-wrapped.
+			if lineBased {
+				if err := requireTypeBound(span.Value); err != nil {
+					return nil, fmt.Errorf("filterop: clean %s at %s: %w", filePath, field, err)
+				}
+			}
 			continue
 		}
 		if !haveKey {
@@ -223,7 +230,7 @@ func cleanValues(rule config.Rule, version int, key []byte, haveKey bool, filePa
 		// like the file/field path components, otherwise it could be
 		// swapped (type:str -> type:bool) without needing the key at all
 		// (audit 2026-09-29, P05; spec 03 AC-3.10).
-		ciphertext, err := siv.Encrypt(key, []byte(span.Value), siv.AAD(siv.ModeValue, filePath, field, string(span.Type)))
+		ciphertext, err := siv.Encrypt(key, []byte(span.Value), valueAAD(filePath, field, span.Type, span))
 		if err != nil {
 			return nil, fmt.Errorf("filterop: clean %s at %s: %w", filePath, field, err)
 		}
@@ -242,9 +249,10 @@ func cleanValues(rule config.Rule, version int, key []byte, haveKey bool, filePa
 }
 
 // smudgeValues reverses cleanValues, restoring each scalar's original type
-// from its tag. An untagged field passes through unchanged (AC-6.7); a
-// tagged one that fails to parse or authenticate is reported rather than
-// written out as wrong-but-plausible plaintext (AC-6.9). Each field selects
+// from its tag, or for .env/.properties the raw literal it was written as.
+// An untagged field passes through unchanged (AC-6.7); a tagged one that
+// fails to parse or authenticate is reported rather than written out as
+// wrong-but-plausible plaintext (AC-6.9). Each field selects
 // its key by its own tag-declared version (AC-6.13), not the config's
 // current version — one the keyring doesn't hold is left tagged, as-is,
 // and named in the returned []Skipped (AC-6.11), independently of every
@@ -254,6 +262,7 @@ func smudgeValues(rule config.Rule, keyring Keyring, filePath string, input []by
 	if err != nil {
 		return nil, nil, fmt.Errorf("filterop: smudge %s: %w", filePath, err)
 	}
+	lineBased := isLineBased(filePath)
 
 	var edits []format.Edit
 	var skipped []Skipped
@@ -289,10 +298,18 @@ func smudgeValues(rule config.Rule, keyring Keyring, filePath string, input []by
 		// AlgoAES256SIVTypeBound (Tag.TypeBound) was encrypted that way.
 		aad := siv.AAD(siv.ModeValue, filePath, field)
 		if parsed.TypeBound {
-			aad = siv.AAD(siv.ModeValue, filePath, field, string(parsed.Type))
+			aad = valueAAD(filePath, field, parsed.Type, span)
+		} else if lineBased {
+			// .env and .properties values postdate type binding, so a
+			// legacy tag here was never written by clean, and its AAD
+			// would skip the quote binding below.
+			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, errLegacyLineTag)
 		}
 		plaintext, err := siv.Decrypt(key, parsed.Ciphertext, aad)
 		if err != nil {
+			if lineBased && span.QuoteBinding() != "" {
+				return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w (if the quotes around the value changed since it was encrypted, restore them)", filePath, field, err)
+			}
 			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, err)
 		}
 		// Stopgap for a legacy tag's still-unauthenticated type field
@@ -309,6 +326,13 @@ func smudgeValues(rule config.Rule, keyring Keyring, filePath string, input []by
 		// reach this in practice (its type can't change without failing
 		// the Decrypt above), so this never rejects legitimate content.
 		if err := validTypeLiteral(handler, string(plaintext), parsed.Type); err != nil {
+			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, err)
+		}
+		// Line-based formats write the value back verbatim, and the quotes
+		// around it aren't authenticated: one edited since clean could
+		// turn a correctly decrypted value into a different one, or a
+		// crafted value into new lines (spec 06 AC-6.15).
+		if err := handler.CheckLiteral(span, string(plaintext)); err != nil {
 			return nil, nil, fmt.Errorf("filterop: smudge %s at %s: %w", filePath, field, err)
 		}
 		rendered, err := handler.Render(string(plaintext), parsed.Type)
@@ -357,6 +381,44 @@ func validTypeLiteral(handler format.Handler, value string, t tag.Type) error {
 	}
 	if err := handler.RoundTrip(value, t); err != nil {
 		return fmt.Errorf("%w: %q is not a valid %s: %v", ErrInvalidTypeLiteral, value, t, err)
+	}
+	return nil
+}
+
+// errLegacyLineTag is returned for a legacy (AlgoAES256SIV) value tag in
+// a .env or .properties file, which clean never writes (spec 06 AC-6.16).
+var errLegacyLineTag = errors.New("legacy value tag in a .env or .properties file; only " + tag.AlgoAES256SIVTypeBound + " tags are accepted there")
+
+// valueAAD is the AAD for a type-bound value: its location, its type and,
+// for .env, the quotes it sits in (spec 06 AC-6.16). Binding the quotes
+// means re-quoting a tag after clean fails authentication instead of
+// smudging the same raw literal into a context where it means something
+// else, e.g. "a\nb" turning into 'a\nb'. The component order is part of
+// the stored format.
+func valueAAD(filePath, field string, t tag.Type, span format.Span) []byte {
+	extra := []string{string(t)}
+	if q := span.QuoteBinding(); q != "" {
+		extra = append(extra, q)
+	}
+	return siv.AAD(siv.ModeValue, filePath, field, extra...)
+}
+
+// isLineBased reports whether filePath is a .env or .properties file.
+func isLineBased(filePath string) bool {
+	kind, _ := format.Detect(path.Base(filePath))
+	return kind.LineBased()
+}
+
+// requireTypeBound refuses an already-encrypted line-format value unless
+// it is a type-bound value tag, so a legacy or whole-file tag fails at
+// git add rather than at the next checkout.
+func requireTypeBound(value string) error {
+	parsed, err := tag.Parse(value)
+	if err != nil {
+		return err
+	}
+	if !parsed.TypeBound {
+		return errLegacyLineTag
 	}
 	return nil
 }

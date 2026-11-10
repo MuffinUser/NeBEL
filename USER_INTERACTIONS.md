@@ -152,8 +152,11 @@ Added to rule config/staging.yaml (mode: value):
 - Every path is checked against the file before the rule is written, so a
   typo fails here rather than on whoever next stages the file.
 - Re-running with the same paths is a no-op.
-- Supported formats: YAML and JSON. `.env` and `.properties` are not
-  implemented yet.
+- Supported formats: YAML, JSON, `.env` (`*.env`, `.env`, `.env.*`) and
+  `.properties`. For `.env`/`.properties` a path is the literal key
+  (`DATABASE_PASSWORD`, `database.password`). The quotes around a value
+  stay in place (`KEY="ENC[...]"`). Keys that appear more than once, and
+  values that span several lines, are refused; use `add file` for those.
 - Both subcommands also add the pattern to `.gitattributes`, then
   immediately re-encrypt any file the new rule already matches among
   files git currently tracks — no further step, even for a file that

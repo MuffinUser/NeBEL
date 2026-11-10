@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
+	"strings"
 
 	"github.com/MuffinUser/nebel/internal/format"
 	"github.com/bmatcuk/doublestar/v4"
@@ -35,18 +37,23 @@ const (
 
 // Rule is one file-selection rule: which files it applies to, and how.
 type Rule struct {
-	// Files is a doublestar glob pattern (github.com/bmatcuk/doublestar/v4),
-	// matched against the file's path relative to the repository root.
-	// Unlike .gitattributes, a pattern without a leading "**/" matches only
-	// at the depth it's written at — "*.env" matches "prod.env" but not
-	// "config/prod.env"; use "**/*.env" to match at any depth.
+	// Files is a glob pattern matched the way .gitattributes matches the
+	// filter line `nebel add` writes for it, so git and nebel agree on
+	// which files a rule covers. A pattern without a "/" matches a file's
+	// base name at any depth ("*.env" matches "prod.env" and
+	// "config/prod.env"). A pattern with a "/" matches the whole path
+	// relative to the repository root, and a leading "/" only anchors it
+	// ("/prod.env" matches the root file alone). Segment syntax is
+	// doublestar's (github.com/bmatcuk/doublestar/v4); see MatchRule for
+	// precedence.
 	Files string `yaml:"files"`
 
 	// Mode selects whole-file (ModeFile) or per-value (ModeValue) handling.
 	Mode Mode `yaml:"mode"`
 
-	// Encrypt lists the dot-notation paths to encrypt, for mode: value
-	// rules — "database.password", "api.keys[0]". Unused by mode: file.
+	// Encrypt lists the values to encrypt, for mode: value rules: dot
+	// paths for YAML/JSON ("database.password", "api.keys[0]"), literal
+	// keys for .env/.properties ("DATABASE_PASSWORD"). Unused by mode: file.
 	Encrypt []string `yaml:"encrypt,omitempty"`
 }
 
@@ -134,8 +141,18 @@ func (c *Config) Validate() error {
 			if len(r.Encrypt) == 0 {
 				return fmt.Errorf("%w: rule %q", ErrNoFields, r.Files)
 			}
+			// The key syntax depends on the format, which a glob only
+			// reveals through its last segment ("*.env", "**/*.properties").
+			// A glob that doesn't name one ("config/*", "**/*.{env,yaml}")
+			// may match several formats, so it gets the loosest check, the
+			// .properties literal key; Locate still rejects a key that's
+			// invalid for the file actually matched (AC-4.11).
+			kind, detected := format.Detect(path.Base(r.Files))
+			if !detected {
+				kind = format.KindProperties
+			}
 			for _, field := range r.Encrypt {
-				if _, err := format.ParsePath(field); err != nil {
+				if err := format.ValidKey(kind, field); err != nil {
 					return fmt.Errorf("config: rule %q: %w", r.Files, err)
 				}
 			}
@@ -146,17 +163,43 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// MatchRule returns the first rule, in file order, whose Files glob matches
-// path. Rule order in the file is therefore the resolution order: the first
-// matching pattern wins, and later rules for an already-matched file are
-// never consulted.
-func (c *Config) MatchRule(path string) (Rule, bool) {
+// MatchRule returns the rule for path, a slash-separated path relative to
+// the repository root. The first rule in file order whose pattern matches
+// the whole path wins. Only if none does is a bare pattern (no "/") tried
+// against the base name, again in file order. So "config/*.env" keeps
+// config/prod.env even when "*.env" is listed first.
+//
+// The first pass is how rules matched before bare patterns matched at any
+// depth, so every file that had a rule then still resolves to the same
+// one, and ciphertext already committed under it decrypts the same way.
+func (c *Config) MatchRule(filePath string) (Rule, bool) {
 	for _, r := range c.Rules {
-		if ok, _ := doublestar.Match(r.Files, path); ok {
+		if matchPath(r.Files, filePath) {
+			return r, true
+		}
+	}
+	base := path.Base(filePath)
+	for _, r := range c.Rules {
+		if !pathPattern(r.Files) && matchPath(r.Files, base) {
 			return r, true
 		}
 	}
 	return Rule{}, false
+}
+
+// pathPattern reports whether pattern names a path rather than a base
+// name, by the .gitattributes rule: it contains a "/".
+func pathPattern(pattern string) bool {
+	return strings.Contains(pattern, "/")
+}
+
+// matchPath matches pattern against name, treating a leading "/" as an
+// anchor to the repository root rather than a literal character.
+// doublestar.Match's error is dropped because Validate already rejected
+// invalid patterns.
+func matchPath(pattern, name string) bool {
+	ok, _ := doublestar.Match(strings.TrimPrefix(pattern, "/"), name)
+	return ok
 }
 
 // Load reads and parses path, then validates it.

@@ -26,6 +26,9 @@ First implementation pass covers **whole-file encryption only**. Per-value
 - `09-cli-status.md` — only the whole-file encrypted/PLAINTEXT reporting
   (AC-9.4); per-value ACs (9.3, 9.8) deferred.
 - `10-cross-platform-build.md` — full scope, unchanged.
+- `05-format-handlers.md` § Line-based formats (`.env`, `.properties`)
+  — added after per-value YAML/JSON shipped. See
+  `../plans/2026-10-02-line-format-value-encryption.md` for the steps.
 - `11-cli-rotate.md` — added post-MVP, once per-value mode (05/06/08) was
   already implemented; not part of the original whole-file-only MVP pass
   above. Full scope.

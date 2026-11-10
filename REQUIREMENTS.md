@@ -119,7 +119,8 @@ with transparent local decryption for developers.
   are equal" leaks — nothing worse. That's the same ceiling any
   deterministic scheme must accept, not an added risk.
 - **Associated data (AAD) binding**: every SIV encryption call binds
-  `AAD = repo-relative file path + field path (+ mode)`. Without this, two
+  `AAD = repo-relative file path + field path (+ mode)`, plus a value's
+  type and, for `.env`, its quote style (spec 06 AC-6.16). Without this, two
   different fields holding the same secret value would produce identical
   ciphertext (cross-field equality leakage), and a ciphertext blob could be
   copy-pasted from one field to another and still decrypt validly there.
@@ -181,6 +182,11 @@ with transparent local decryption for developers.
   - **.properties / .env**: no real nesting — the "path" is an **exact
     literal match** on the full key/variable name (a dot in a `.properties`
     key is just a character, not a path separator).
+    The raw value literal is what gets encrypted (no unquoting or
+    unescaping, quotes stay in the file), always as `type:str`, since
+    neither format has native types. Duplicate configured keys and
+    multi-line values are refused in v1. Details: spec 05 § Line-based
+    formats.
 
 Example config shape:
 

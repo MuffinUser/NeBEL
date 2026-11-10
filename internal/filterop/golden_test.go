@@ -148,3 +148,62 @@ func TestGoldenFixtureStaysBoundToItsPath(t *testing.T) {
 		t.Errorf("Smudge() returned plaintext %q alongside an error", plaintext)
 	}
 }
+
+// goldenLineRules are the mode: value rules for the .env and .properties
+// fixtures. They are added in code rather than to the frozen .nebel.yaml,
+// whose bytes predate per-value mode for these formats.
+func goldenLineRules() []config.Rule {
+	return []config.Rule{
+		{Files: "config/*.env", Mode: config.ModeValue, Encrypt: []string{"DATABASE_PASSWORD", "API_TOKEN", "GREETING"}},
+		{Files: "config/*.properties", Mode: config.ModeValue, Encrypt: []string{"database.password", "api.token"}},
+	}
+}
+
+// goldenLinePlaintexts are the working-tree contents of the line-format
+// fixtures. Which bytes form a value's "raw literal" (spec 05 § Line-based
+// formats) is as much part of the stored format as the AAD encoding: a
+// change to span boundaries is self-consistent but re-encrypts every
+// committed value (spec 06 AC-6.14). The values cover a quoted literal
+// with an escape, an inline comment, a \uXXXX escape and trailing
+// whitespace, and all three .env quote bindings (AC-6.16).
+func goldenLinePlaintexts() map[string][]byte {
+	return map[string][]byte{
+		"config/prod.env": []byte("# frozen fixture\n" +
+			"APP_NAME=nebel\n" +
+			"export DATABASE_PASSWORD=\"p@ss \\\"word\\\"\"   # rotate quarterly\n" +
+			"API_TOKEN=tok_live#1\n" +
+			"GREETING='say \"hi\" $USER'\n"),
+		"config/app.properties": []byte("# frozen fixture\n" +
+			"database.url=jdbc:postgresql://db/app\n" +
+			"database.password = caf\\u00e9 s3cr3t  \n" +
+			"api.token:tok_live\n"),
+	}
+}
+
+// AC-6.14: committed .env and .properties values written by this build
+// must keep decrypting, and re-cleaning their plaintext must reproduce the
+// stored bytes exactly.
+func TestLineFormatGoldenFixtures(t *testing.T) {
+	cfg, keyring := loadGoldenRepo(t)
+	cfg.Rules = append(cfg.Rules, goldenLineRules()...)
+
+	for repoPath, plaintext := range goldenLinePlaintexts() {
+		t.Run(repoPath, func(t *testing.T) {
+			stored := readGoldenFile(t, repoPath)
+			got, _, err := Smudge(cfg, keyring, repoPath, stored)
+			if err != nil {
+				t.Fatalf("committed values no longer decrypt: %v", err)
+			}
+			if !bytes.Equal(got, plaintext) {
+				t.Errorf("decrypted content changed:\n got  = %q\n want = %q", got, plaintext)
+			}
+			cleaned, err := Clean(cfg, keyring, repoPath, plaintext)
+			if err != nil {
+				t.Fatalf("Clean: %v", err)
+			}
+			if !bytes.Equal(cleaned, stored) {
+				t.Errorf("stored format changed:\n got  = %s\n want = %s", cleaned, stored)
+			}
+		})
+	}
+}

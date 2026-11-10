@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/MuffinUser/nebel/internal/config"
 )
 
 // Regression test for the 2026-09-29 audit's P07 sub-issue 2: a glob
@@ -92,5 +94,80 @@ func TestEscapeGitattributesPatternResolvesInGit(t *testing.T) {
 				t.Errorf("line %q: git check-attr for %q = %q, want it to resolve filter: nebel", line, tt.path, got)
 			}
 		})
+	}
+}
+
+// Audit 2026-09-29 P07(1): .nebel.yaml and the .gitattributes line add
+// writes must cover the same files. Git runs the filter for a path only if
+// .gitattributes says so, and the filter then needs a rule for it, so a
+// disagreement either way fails checkout or skips encryption. This asks
+// git, via `check-attr`, for each pattern/path pair and compares the
+// answer with config.MatchRule's.
+func TestMatchRuleAgreesWithGitattributes(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tests := []struct {
+		glob string
+		path string
+	}{
+		{"*.env", "prod.env"},
+		{"*.env", "a/b/prod.env"},
+		{".env.local", "svc/.env.local"},
+		{".env.local", "svc/x.env.local"},
+		{"secrets/*.pem", "secrets/prod.pem"},
+		{"secrets/*.pem", "secrets/sub/prod.pem"},
+		{"secrets/*.pem", "other/secrets/prod.pem"},
+		{"/root.env", "root.env"},
+		{"/root.env", "sub/root.env"},
+		{"**/*.env", "a/b/prod.env"},
+		{"config/**/*.yaml", "config/a/b/app.yaml"},
+		{"My File.env", "dir/My File.env"},
+		{"[ab].pem", "dir/a.pem"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.glob+"|"+tt.path, func(t *testing.T) {
+			dir := t.TempDir()
+			if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
+				t.Fatalf("git init: %v\n%s", err, out)
+			}
+			if err := addGitattributesPattern(dir, tt.glob); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("git", "check-attr", "filter", "--", tt.path)
+			cmd.Dir = dir
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("git check-attr: %v\n%s", err, out)
+			}
+			gitMatches := strings.HasSuffix(strings.TrimSpace(string(out)), "filter: nebel")
+
+			cfg := &config.Config{Rules: []config.Rule{{Files: tt.glob, Mode: config.ModeFile}}}
+			_, nebelMatches := cfg.MatchRule(tt.path)
+			if gitMatches != nebelMatches {
+				t.Errorf("pattern %q, path %q: git matches = %v, MatchRule matches = %v", tt.glob, tt.path, gitMatches, nebelMatches)
+			}
+		})
+	}
+}
+
+// Git doesn't expand braces, so a braced pattern's .gitattributes line
+// matches no file and those files would be committed as plaintext. add
+// refuses the pattern instead.
+func TestAddRefusesBracedPattern(t *testing.T) {
+	pathEnv := pathEnvWithBin(t)
+	repo := newTestRepo(t, pathEnv)
+	initWithPassword(t, repo, pathEnv, "test-password-123")
+
+	out, err := runInExpectingError(t, repo, pathEnv, "nebel", "add", "file", "secrets/*.{pem,key}")
+	if err == nil || !strings.Contains(out, "braces") {
+		t.Fatalf("add file with braces: want a refusal mentioning braces, got err=%v:\n%s", err, out)
+	}
+	if strings.Contains(readConfig(t, repo), "{") {
+		t.Error("a refused braced pattern was still written to .nebel.yaml")
+	}
+	if attrs, _ := os.ReadFile(filepath.Join(repo, ".gitattributes")); strings.Contains(string(attrs), "{") {
+		t.Error("a refused braced pattern was still written to .gitattributes")
 	}
 }

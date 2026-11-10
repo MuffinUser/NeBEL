@@ -40,35 +40,36 @@ rules:
 	}
 }
 
-// AC-4.2: glob semantics are doublestar (github.com/bmatcuk/doublestar/v4):
-// a bare pattern matches only at the depth it's written at; "**/" is needed
-// to match at any depth. This test enumerates both matching and
-// non-matching paths per pattern, documenting the exact behavior chosen.
+// AC-4.2: glob semantics follow .gitattributes. A pattern without a "/"
+// matches a base name at any depth, one with a "/" matches the path from
+// the repository root, and a leading "/" anchors. Segment syntax is
+// doublestar's (github.com/bmatcuk/doublestar/v4). This test enumerates
+// matching and non-matching paths per pattern.
 func TestMatchRuleGlobSemantics(t *testing.T) {
-	cfg := &Config{Rules: []Rule{
-		{Files: "secrets/*.pem", Mode: ModeFile},
-		{Files: "**/*.env", Mode: ModeFile},
-	}}
-
 	tests := []struct {
-		path string
-		want bool
+		pattern string
+		path    string
+		want    bool
 	}{
-		{"secrets/prod.pem", true},
-		{"secrets/sub/prod.pem", false}, // "*" does not cross "/"
-		{"other/prod.pem", false},
-		{".env", true},
-		{"prod.env", true},
-		{"config/staging.env", true}, // "**/*.env" matches any depth
-		{"a/b/c/deep.env", true},
-		{"prod.env.bak", false},
-		{"README.md", false},
+		{"secrets/*.pem", "secrets/prod.pem", true},
+		{"secrets/*.pem", "secrets/sub/prod.pem", false}, // "*" does not cross "/"
+		{"secrets/*.pem", "other/secrets/prod.pem", false},
+		{"*.env", "prod.env", true},
+		{"*.env", "config/staging.env", true}, // a bare pattern matches at any depth
+		{"*.env", "a/b/c/deep.env", true},
+		{"*.env", "prod.env.bak", false},
+		{".env.local", "svc/.env.local", true},
+		{".env.local", "svc/x.env.local", false},
+		{"/root.env", "root.env", true},
+		{"/root.env", "sub/root.env", false}, // a leading "/" anchors
+		{"**/*.env", "a/b/prod.env", true},
+		{"**/*.env", "README.md", false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			_, got := cfg.MatchRule(tt.path)
-			if got != tt.want {
-				t.Errorf("MatchRule(%q) matched = %v, want %v", tt.path, got, tt.want)
+		t.Run(tt.pattern+"|"+tt.path, func(t *testing.T) {
+			cfg := &Config{Rules: []Rule{{Files: tt.pattern, Mode: ModeFile}}}
+			if _, got := cfg.MatchRule(tt.path); got != tt.want {
+				t.Errorf("MatchRule(%q) with pattern %q matched = %v, want %v", tt.path, tt.pattern, got, tt.want)
 			}
 		})
 	}
@@ -87,6 +88,40 @@ func TestMatchRulePrecedence(t *testing.T) {
 	}
 	if got.Files != first.Files {
 		t.Errorf("MatchRule() returned %q, want the first matching rule %q", got.Files, first.Files)
+	}
+}
+
+// AC-4.3: a bare pattern's any-depth match is tried only after no rule
+// matched the whole path. Bare patterns used to match root files only, so
+// this keeps every file on the rule it had before: config/prod.env stays
+// on "config/*.env", and config/app.yaml stays on "**", which always
+// matched at any depth.
+func TestMatchRuleWholePathMatchesBeforeBaseNameMatches(t *testing.T) {
+	bare := Rule{Files: "*.env", Mode: ModeFile}
+	nested := Rule{Files: "config/*.env", Mode: ModeValue, Encrypt: []string{"KEY"}}
+	anchored := Rule{Files: "/prod.env", Mode: ModeValue, Encrypt: []string{"KEY"}}
+	cfg := &Config{Rules: []Rule{bare, nested, anchored}}
+	for path, want := range map[string]string{
+		"config/prod.env": nested.Files,
+		"svc/prod.env":    bare.Files,
+		"prod.env":        bare.Files,
+	} {
+		got, ok := cfg.MatchRule(path)
+		if !ok || got.Files != want {
+			t.Errorf("MatchRule(%q) = %q (matched %v), want %q", path, got.Files, ok, want)
+		}
+	}
+
+	everything := Rule{Files: "**", Mode: ModeFile}
+	yamlRule := Rule{Files: "config/*.yaml", Mode: ModeValue, Encrypt: []string{"password"}}
+	cfg = &Config{Rules: []Rule{everything, yamlRule}}
+	for path, want := range map[string]string{
+		"config/app.yaml": everything.Files,
+	} {
+		got, ok := cfg.MatchRule(path)
+		if !ok || got.Files != want {
+			t.Errorf("MatchRule(%q) = %q (matched %v), want %q", path, got.Files, ok, want)
+		}
 	}
 }
 
@@ -246,4 +281,42 @@ func writeTempConfig(t *testing.T, contents string) string {
 		t.Fatalf("writing temp config: %v", err)
 	}
 	return path
+}
+
+// AC-4.11: an encrypt entry is checked with the key syntax of the format
+// its rule's glob names. Literal .env/.properties keys that aren't valid
+// dot notation must load, also under a glob naming no single format.
+func TestLoadValidatesKeysByFormat(t *testing.T) {
+	for _, tt := range []struct {
+		name, files, key string
+		ok               bool
+	}{
+		{"properties dotted key", "*.properties", "a..b", true},
+		{"properties bracket", "**/*.properties", "foo[", true},
+		{"properties escaped space", "app.properties", "my key", true},
+		{"env literal", "*.env", "DATABASE_PASSWORD", true},
+		{"env.* glob", ".env.*", "API.KEY", true},
+		{"env with space", "*.env", "A B", false},
+		{"env with equals", "*.env", "A=B", false},
+		{"properties control char", "*.properties", "a\tb", false},
+		{"yaml dot path", "**/*.yaml", "database.password", true},
+		{"yaml bad path", "**/*.yaml", "a..b", false},
+		{"unknown glob dot path", "config/*", "database.password", true},
+		{"unknown glob literal key", "config/*", "a..b", true},
+		{"brace glob literal key", "**/*.{env,properties}", "FOO[", true},
+		{"prefix glob literal key", ".env*", "a..b", true},
+		{"unknown glob control char", "config/*", "a\tb", false},
+		{"unknown glob empty", "config/*", "", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{Rules: []Rule{{Files: tt.files, Mode: ModeValue, Encrypt: []string{tt.key}}}}
+			err := cfg.Validate()
+			if tt.ok && err != nil {
+				t.Errorf("Validate() = %v, want nil", err)
+			}
+			if !tt.ok && !errors.Is(err, format.ErrBadPath) {
+				t.Errorf("Validate() = %v, want %v", err, format.ErrBadPath)
+			}
+		})
+	}
 }

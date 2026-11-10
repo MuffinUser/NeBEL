@@ -132,6 +132,36 @@ git add . && git commit -m "encrypt secrets"
 `.nebel.yaml` and `.gitattributes` are committed and shared; the password
 is not — distribute it to your team out of band.
 
+`add field` works on YAML, JSON, `.env` (`*.env`, `.env`, `.env.*`) and
+`.properties` files. For YAML/JSON a field is a dot path
+(`database.password`, `api.keys[0]`). For `.env`/`.properties` it is the
+key exactly as written (`DATABASE_PASSWORD`, `database.password`), and
+the value's quotes stay in the file:
+
+```sh
+nebel add field .env.local DATABASE_PASSWORD API_TOKEN
+# export DATABASE_PASSWORD="s3cr3t"  →  export DATABASE_PASSWORD="ENC[...]"
+```
+
+The quotes are authenticated along with the value. Re-quoting the
+plaintext in your working tree is fine, but changing the quotes around
+an `ENC[...]` tag makes checkout fail for that key until they're
+restored.
+
+A key that appears more than once, or a value spanning several lines
+(a PEM key, a `.properties` continuation), is refused: use `add file` for
+those.
+
+Patterns in `.nebel.yaml` match the way `.gitattributes` does. A pattern
+without a `/` matches a file name at any depth, so `*.env` and
+`.env.local` also cover `svc/.env.local`. A pattern with a `/` matches the
+path from the repository root (`config/*.yaml`), and a leading `/` limits
+a name to the root (`/.env`). Rules are tried in file order, but a bare
+pattern's match in a subdirectory only counts if no rule matches the full
+path, so `config/*.env` wins for `config/prod.env` even after `*.env`. `add` refuses patterns
+with braces (`*.{pem,key}`), since git doesn't expand them; add each
+alternative separately.
+
 Join an existing repo, after cloning — `init` prompts for the shared
 password:
 

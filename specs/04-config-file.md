@@ -13,14 +13,22 @@ USER_INTERACTIONS.md § init / add.
   `value`), and — for `mode: value` only — `encrypt: []` (list of
   dot-notation paths). Only the *current* version's salt/canary live in
   the file — see AC-4.9 for how an older version's are found.
-- **AC-4.2 Glob semantics**: pattern matching follows `.gitattributes`-style
-  glob syntax (document the exact library/semantics chosen, incl. `**`
-  recursive matching); a unit test enumerates matching and non-matching
-  paths per pattern.
+- **AC-4.2 Glob semantics**: pattern matching follows `.gitattributes`, so
+  a rule covers exactly the files its `.gitattributes` line sends through
+  the filter. A pattern without a `/` matches the base name at any depth
+  (`*.env` matches `config/prod.env`). A pattern with a `/` matches the
+  path relative to the repository root, and a leading `/` only anchors
+  (`/prod.env` matches the root file alone). Segment syntax is
+  doublestar's (`*` doesn't cross `/`, `**` matches any number of
+  directories). A unit test enumerates matching and non-matching paths per
+  pattern, and an integration test checks each answer against
+  `git check-attr`.
 - **AC-4.3 Rule precedence**: when a file matches more than one rule's
-  `files` glob, the defined precedence (e.g. "first matching rule in
-  file order wins") is explicit and tested — no undefined/ambiguous
-  behavior.
+  `files` glob, the first matching rule in file order wins. One exception
+  keeps older configs resolving as before: a bare pattern's any-depth
+  match (against the base name) is tried only after no rule matched the
+  whole path, so `config/*.env` keeps `config/prod.env` even when `*.env`
+  is listed first. (Bare patterns used to match root files only.)
 - **AC-4.4 Invalid mode rejected**: a `mode` value other than `file` or
   `value` fails config loading with a clear error.
 - **AC-4.5 Empty encrypt list rejected**: a `mode: value` rule with an

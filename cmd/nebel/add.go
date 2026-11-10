@@ -62,6 +62,9 @@ func runAddFile(args []string) error {
 		return fmt.Errorf("usage: nebel add file <glob>")
 	}
 	glob := normalizePath(args[0])
+	if err := checkGitattributesPattern(glob); err != nil {
+		return err
+	}
 
 	root, configPath, cfg, err := openConfig()
 	if err != nil {
@@ -107,6 +110,9 @@ func runAddField(args []string) error {
 		return fmt.Errorf("usage: nebel add field <file> [path...]")
 	}
 	target, paths := normalizePath(args[0]), args[1:]
+	if err := checkGitattributesPattern(target); err != nil {
+		return err
+	}
 
 	root, configPath, cfg, err := openConfig()
 	if err != nil {
@@ -158,6 +164,19 @@ func runAddField(args []string) error {
 		fmt.Printf("  %s\n", path)
 	}
 	return renormalizeAndReport(root, cfg, target)
+}
+
+// checkGitattributesPattern refuses a pattern that .nebel.yaml and
+// .gitattributes would read differently. Braces are the case: doublestar
+// expands "*.{pem,key}" into alternatives, but git's wildmatch takes the
+// braces literally, so the .gitattributes line matches no real file. Git
+// would never run the filter and the files would be committed as
+// plaintext while add reported success.
+func checkGitattributesPattern(pattern string) error {
+	if strings.ContainsAny(pattern, "{}") {
+		return fmt.Errorf("%q contains braces, which .gitattributes doesn't expand — add each alternative separately (e.g. `nebel add file '*.pem'` and `nebel add file '*.key'`)", pattern)
+	}
+	return nil
 }
 
 // normalizePath gives a CLI path or glob the repo-relative, slash-separated
@@ -219,11 +238,12 @@ func applyFieldRule(cfg *config.Config, pattern string, added []string) error {
 // cfg.MatchRule resolves to the rule named pattern — the one this `add`
 // call just wrote or reconfirmed — rather than whatever a raw pathspec
 // match on pattern would return. That distinction matters twice over:
-// spec 08's glob and .gitattributes' pattern can disagree on what they
-// match (audit finding, cross-directory `*.env` semantics), and `git add
-// --renormalize`'s own pathspec form errors outright when pattern
-// matches no tracked file yet — which a brand-new glob commonly does,
-// before anything matching it has ever been committed.
+// an earlier rule may take precedence for some files pattern matches,
+// and pathspecs aren't .nebel.yaml patterns (a pathspec "*.env" also
+// crosses "/", and `git add --renormalize`'s pathspec form errors
+// outright when pattern matches no tracked file yet — which a brand-new
+// glob commonly does, before anything matching it has ever been
+// committed).
 func filesMatchingNewRule(root string, cfg *config.Config, pattern string) ([]string, error) {
 	tracked, err := gitutil.TrackedFiles(root)
 	if err != nil {

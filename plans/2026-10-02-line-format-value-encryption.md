@@ -31,10 +31,10 @@ Specs: 05 § Line-based formats (AC-5.9–5.32), 04 AC-4.11, 06 AC-6.14–6.15,
 5. **Open spec decisions** AC-5.10 (quoting) and AC-5.13 (continuation)
    are now decided.
 6. **Docs**: USER_INTERACTIONS said "not implemented yet" (updated).
-7. **Known limitation, not addressed here**: `*.env` in `.nebel.yaml`
-   matches only at the repository root (doublestar), while `.gitattributes`
-   matches at any depth (audit 2026-09-29 §153). Users should write
-   `**/*.env`. Out of scope, but worth a README note.
+7. **Glob depth (fixed afterwards)**: `*.env` in `.nebel.yaml` used to
+   match only at the repository root (doublestar), while `.gitattributes`
+   matches at any depth (audit 2026-09-29 §153). Rules now match the way
+   `.gitattributes` does (spec 04 AC-4.2, AC-4.3).
 
 ## Steps (each step leaves `go test ./...` green; one commit per step)
 
@@ -76,8 +76,8 @@ Specs: 05 § Line-based formats (AC-5.9–5.32), 04 AC-4.11, 06 AC-6.14–6.15,
      duplicate/multi-line keys (AC-8.12). `undecrypted.go` and rotate get
      the formats for free via `format.For`; add one rotate e2e on a `.env`
      to prove it.
-8. **Docs** — README format table and examples, plus the `**/*.env` glob
-   note.
+8. **Docs** — README format table and examples, plus how rule patterns
+   match.
 
 ## Upgrading
 

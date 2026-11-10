@@ -150,11 +150,17 @@ restored.
 
 A key that appears more than once, or a value spanning several lines
 (a PEM key, a `.properties` continuation), is refused: use `add file` for
-those. Rules in `.nebel.yaml` match at the depth they're written, while
-the `.gitattributes` line `add` writes matches at any depth. A nested
-`svc/.env` then fails `git add` and checkout with "no rule in .nebel.yaml
-matches it"; write `**/*.env` by hand to cover `.env` files in every
-directory.
+those.
+
+Patterns in `.nebel.yaml` match the way `.gitattributes` does. A pattern
+without a `/` matches a file name at any depth, so `*.env` and
+`.env.local` also cover `svc/.env.local`. A pattern with a `/` matches the
+path from the repository root (`config/*.yaml`), and a leading `/` limits
+a name to the root (`/.env`). Rules are tried in file order, but a bare
+pattern's match in a subdirectory only counts if no rule matches the full
+path, so `config/*.env` wins for `config/prod.env` even after `*.env`. `add` refuses patterns
+with braces (`*.{pem,key}`), since git doesn't expand them; add each
+alternative separately.
 
 Join an existing repo, after cloning — `init` prompts for the shared
 password:

@@ -63,3 +63,7 @@ diff. A bare `add <glob>` names neither and is refused with usage.
   duplicated keys and multi-line values aren't offered. A named path that
   is duplicated or multi-line is refused under AC-8.4 with the handler's
   error (`ErrDuplicateKey` / `ErrMultiline`).
+- **AC-8.13**: `add file` and `add field` refuse a pattern containing `{`
+  or `}`. `.nebel.yaml` would expand the braces, but git takes them
+  literally, so the `.gitattributes` line would match no file and those
+  files would be committed as plaintext.
